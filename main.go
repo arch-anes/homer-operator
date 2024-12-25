@@ -127,17 +127,23 @@ func fetchHomerConfig(clientset *kubernetes.Clientset) (HomerConfig, error) {
 		}
 
 		annotations := ingress.Annotations
-		serviceName := getAnnotationOrDefault(annotations, "homer.service.name", "default")
+		service := &HomerService{
+			Name: getAnnotationOrDefault(annotations, "homer.service.name", "default"),
+			Icon: annotations["homer.service.icon"],
+			Items: []HomerItem{*item},
+			Rank: ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, "homer.service.rank", "0"))),
+		}
 
-		if existingService, exists := serviceMap[serviceName]; exists {
+		if existingService, exists := serviceMap[service.Name]; exists {
 			existingService.Items = append(existingService.Items, *item)
-		} else {
-			serviceMap[serviceName] = &HomerService{
-				Name:  serviceName,
-				Icon:  annotations["homer.service.icon"],
-				Items: []HomerItem{*item},
-				Rank:  ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, "homer.service.rank", "0"))),
+			if existingService.Icon == "" && service.Icon != "" {
+				existingService.Icon = service.Icon
 			}
+			if existingService.Rank == 0 && service.Rank != 0 {
+				existingService.Rank = service.Rank
+			}
+		} else {
+			serviceMap[service.Name] = service
 		}
 	}
 
