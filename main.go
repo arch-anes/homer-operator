@@ -31,8 +31,8 @@ type HomerItem struct {
 	Logo string `yaml:"logo"`
 	URL  string `yaml:"url"`
 	Type string `yaml:"type"`
-	Excluded bool `yaml:"excluded"`
-	Rank int    `yaml:"rank"`
+	Excluded bool `yaml:"-"`
+	Rank int    `yaml:"-"`
 }
 
 type HomerService struct {
