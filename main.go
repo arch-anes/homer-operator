@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/iancoleman/strcase"
 	"gopkg.in/yaml.v3"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -51,7 +52,7 @@ func ignoreError[T any](val T, _ error) T {
 func extractHomerAnnotations(ingress networkingv1.Ingress) *HomerItem {
 	annotations := ingress.Annotations
 	item := &HomerItem{
-		Name: getAnnotationOrDefault(annotations, "homer.item.name", ingress.Name),
+		Name: getAnnotationOrDefault(annotations, "homer.item.name", strcase.ToCamel(ingress.Name)),
 		Logo: annotations["homer.item.logo"],
 		URL:  getAnnotationOrDefault(annotations, "homer.item.url", deduceURL(ingress)),
 		Type: annotations["homer.item.type"],
