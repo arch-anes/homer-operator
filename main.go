@@ -122,8 +122,36 @@ func sortHomerServices(entries []HomerService) {
 	})
 }
 
+func fetchAllIngresses(clientset *kubernetes.Clientset) ([]networkingv1.Ingress, error) {
+    var allIngresses []networkingv1.Ingress
+    continueToken := ""
+
+    for {
+        options := metav1.ListOptions{}
+        if continueToken != "" {
+            options.Continue = continueToken
+        }
+
+        ingressList, err := clientset.NetworkingV1().Ingresses("").List(context.TODO(), options)
+        if err != nil {
+            log.WithError(err).Error("Failed to list ingresses")
+            return nil, err
+        }
+
+        allIngresses = append(allIngresses, ingressList.Items...)
+
+        if ingressList.Continue == "" {
+            break
+        }
+        continueToken = ingressList.Continue
+    }
+
+    log.Infof("Total ingresses fetched: %d", len(allIngresses))
+    return allIngresses, nil
+}
+
 func fetchHomerConfig(clientset *kubernetes.Clientset) (HomerConfig, error) {
-	ingressList, err := clientset.NetworkingV1().Ingresses("").List(context.TODO(), metav1.ListOptions{})
+	ingresses, err := fetchAllIngresses(clientset)
 	if err != nil {
 		log.WithError(err).Error("Failed to list ingresses")
 		return HomerConfig{}, err
@@ -131,7 +159,8 @@ func fetchHomerConfig(clientset *kubernetes.Clientset) (HomerConfig, error) {
 
 	serviceMap := make(map[string]*HomerService)
 
-	for _, ingress := range ingressList.Items {
+	for _, ingress := range ingresses {
+		log.WithField("ingress", ingress.Name).Debug("Processing ingress")
 		item := extractHomerAnnotations(ingress)
 		if item == nil {
 			continue
