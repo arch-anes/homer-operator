@@ -67,6 +67,7 @@ func extractHomerAnnotations(ingress networkingv1.Ingress) *HomerItem {
 	}
 
 	if item.Name == "" || item.URL == "" {
+		fmt.Printf("Skipping invalid ingress: %s\n", ingress.Name)
 		return nil
 	}
 	return item
