@@ -5,7 +5,8 @@
 	},
 	"runArgs": [
 		"--privileged",
-		"--volume=/var/run/docker.sock:/var/run/docker.sock"
+		"--volume=/var/run/docker.sock:/var/run/docker.sock",
+		"--network=host"
 	],
 	"remoteUser": "vscode",
 	"customizations": {
