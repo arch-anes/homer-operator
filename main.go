@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"syscall"
 	"time"
@@ -21,7 +22,7 @@ import (
 const (
 	configFilePath     = "/www/assets/config.yml"
 	baseConfigFilePath = "/www/assets/base_config.yml"
-	configSeparator = "\n#Automatically generated config:\n"
+	configSeparator    = "\n#Automatically generated config:\n"
 )
 
 type HomerItem struct {
@@ -29,40 +30,38 @@ type HomerItem struct {
 	Logo string `yaml:"logo"`
 	URL  string `yaml:"url"`
 	Type string `yaml:"type"`
+	Excluded bool `yaml:"excluded"`
+	Rank int    `yaml:"rank"`
 }
 
 type HomerService struct {
-	Name  string       `yaml:"name"`
-	Icon  string       `yaml:"icon"`
-	Items []HomerItem  `yaml:"items"`
+	Name  string      `yaml:"name"`
+	Icon  string      `yaml:"icon"`
+	Items []HomerItem `yaml:"items"`
 }
 
 type HomerConfig struct {
 	Services []HomerService `yaml:"services"`
 }
 
-func isItemExcluded(ingress networkingv1.Ingress) bool {
-	annotations := ingress.Annotations
-	excluded, err := strconv.ParseBool(getAnnotationOrDefault(annotations, "homer.item.excluded", "false"))
-	if err != nil {
-		fmt.Printf("Error parsing 'homer.item.excluded' from ingress: %s\n", ingress.Name)
-		return false
-	}
-	return excluded
+func ignoreError[T any](val T, _ error) T {
+	return val
 }
 
 func extractHomerAnnotations(ingress networkingv1.Ingress) *HomerItem {
-	if isItemExcluded(ingress) {
-		fmt.Printf("Skipping excluded ingress: %s\n", ingress.Name)
-		return nil
-	}
-
 	annotations := ingress.Annotations
 	item := &HomerItem{
 		Name: getAnnotationOrDefault(annotations, "homer.item.name", ingress.Name),
 		Logo: annotations["homer.item.logo"],
 		URL:  getAnnotationOrDefault(annotations, "homer.item.url", deduceURL(ingress)),
 		Type: annotations["homer.item.type"],
+		Excluded: ignoreError(strconv.ParseBool(getAnnotationOrDefault(annotations, "homer.item.excluded", "false"))),
+		Rank: ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, "homer.item.rank", "0"))),
+	}
+
+	if item.Excluded {
+		fmt.Printf("Skipping excluded ingress: %s\n", ingress.Name)
+		return nil
 	}
 
 	if item.Name == "" || item.URL == "" {
@@ -83,6 +82,19 @@ func deduceURL(ingress networkingv1.Ingress) string {
 		return "https://" + ingress.Spec.Rules[0].Host
 	}
 	return ""
+}
+
+func sortHomerItems(items []HomerItem) {
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Rank != 0 && items[j].Rank != 0 {
+			return items[i].Rank < items[j].Rank
+		} else if items[i].Rank != 0 {
+			return true
+		} else if items[j].Rank != 0 {
+			return false
+		}
+		return items[i].Name < items[j].Name
+	})
 }
 
 func fetchHomerConfig(clientset *kubernetes.Clientset) (HomerConfig, error) {
@@ -114,6 +126,7 @@ func fetchHomerConfig(clientset *kubernetes.Clientset) (HomerConfig, error) {
 
 	var services []HomerService
 	for _, service := range serviceMap {
+		sortHomerItems(service.Items)
 		services = append(services, *service)
 	}
 
