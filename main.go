@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"sort"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -105,7 +106,7 @@ func sortHomerItems(entries []HomerItem) {
 		} else if entries[j].Rank != 0 {
 			return false
 		}
-		return entries[i].Name < entries[j].Name
+		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 	})
 }
 
@@ -118,7 +119,7 @@ func sortHomerServices(entries []HomerService) {
 		} else if entries[j].Rank != 0 {
 			return false
 		}
-		return entries[i].Name < entries[j].Name
+		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 	})
 }
 
