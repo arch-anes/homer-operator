@@ -1,0 +1,22 @@
+{
+	"name": "Homer operator devcontainer",
+	"build": {
+		"dockerfile": "./Dockerfile",
+	},
+	"runArgs": [
+		"--privileged",
+		"--volume=/var/run/docker.sock:/var/run/docker.sock"
+	],
+	"remoteUser": "vscode",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"redhat.vscode-yaml",
+				"visualstudioexptteam.vscodeintellicode",
+				"ms-azuretools.vscode-docker",
+				"ms-kubernetes-tools.vscode-kubernetes-tools",
+				"golang.Go"
+			]
+		}
+	}
+}
