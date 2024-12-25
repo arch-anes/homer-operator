@@ -149,6 +149,10 @@ func fetchHomerConfig(clientset *kubernetes.Clientset) (HomerConfig, error) {
 
 	var services []HomerService
 	for _, service := range serviceMap {
+		if len(service.Items) == 0 {
+			fmt.Printf("Skipping empty service: %s\n", service.Name)
+			continue
+		}
 		sortHomerItems(service.Items)
 		services = append(services, *service)
 	}
