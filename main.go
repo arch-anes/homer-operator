@@ -27,18 +27,19 @@ const (
 )
 
 type HomerItem struct {
-	Name string `yaml:"name"`
-	Logo string `yaml:"logo"`
-	URL  string `yaml:"url"`
-	Type string `yaml:"type"`
-	Excluded bool `yaml:"-"`
-	Rank int    `yaml:"-"`
+	Name     string `yaml:"name"`
+	Logo     string `yaml:"logo"`
+	URL      string `yaml:"url"`
+	Type     string `yaml:"type"`
+	Excluded bool   `yaml:"-"`
+	Rank     int    `yaml:"-"`
 }
 
 type HomerService struct {
 	Name  string      `yaml:"name"`
 	Icon  string      `yaml:"icon"`
 	Items []HomerItem `yaml:"items"`
+	Rank  int         `yaml:"-"`
 }
 
 type HomerConfig struct {
@@ -52,12 +53,12 @@ func ignoreError[T any](val T, _ error) T {
 func extractHomerAnnotations(ingress networkingv1.Ingress) *HomerItem {
 	annotations := ingress.Annotations
 	item := &HomerItem{
-		Name: getAnnotationOrDefault(annotations, "homer.item.name", strcase.ToCamel(ingress.Name)),
-		Logo: annotations["homer.item.logo"],
-		URL:  getAnnotationOrDefault(annotations, "homer.item.url", deduceURL(ingress)),
-		Type: annotations["homer.item.type"],
+		Name:     getAnnotationOrDefault(annotations, "homer.item.name", strcase.ToCamel(ingress.Name)),
+		Logo:     annotations["homer.item.logo"],
+		URL:      getAnnotationOrDefault(annotations, "homer.item.url", deduceURL(ingress)),
+		Type:     annotations["homer.item.type"],
 		Excluded: ignoreError(strconv.ParseBool(getAnnotationOrDefault(annotations, "homer.item.excluded", "false"))),
-		Rank: ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, "homer.item.rank", "0"))),
+		Rank:     ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, "homer.item.rank", "0"))),
 	}
 
 	if item.Excluded {
@@ -85,16 +86,29 @@ func deduceURL(ingress networkingv1.Ingress) string {
 	return ""
 }
 
-func sortHomerItems(items []HomerItem) {
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].Rank != 0 && items[j].Rank != 0 {
-			return items[i].Rank < items[j].Rank
-		} else if items[i].Rank != 0 {
+func sortHomerItems(entries []HomerItem) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].Rank != 0 && entries[j].Rank != 0 {
+			return entries[i].Rank < entries[j].Rank
+		} else if entries[i].Rank != 0 {
 			return true
-		} else if items[j].Rank != 0 {
+		} else if entries[j].Rank != 0 {
 			return false
 		}
-		return items[i].Name < items[j].Name
+		return entries[i].Name < entries[j].Name
+	})
+}
+
+func sortHomerServices(entries []HomerService) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].Rank != 0 && entries[j].Rank != 0 {
+			return entries[i].Rank < entries[j].Rank
+		} else if entries[i].Rank != 0 {
+			return true
+		} else if entries[j].Rank != 0 {
+			return false
+		}
+		return entries[i].Name < entries[j].Name
 	})
 }
 
@@ -112,15 +126,17 @@ func fetchHomerConfig(clientset *kubernetes.Clientset) (HomerConfig, error) {
 			continue
 		}
 
-		serviceName := getAnnotationOrDefault(ingress.Annotations, "homer.service.name", "default")
+		annotations := ingress.Annotations
+		serviceName := getAnnotationOrDefault(annotations, "homer.service.name", "default")
 
 		if existingService, exists := serviceMap[serviceName]; exists {
 			existingService.Items = append(existingService.Items, *item)
 		} else {
 			serviceMap[serviceName] = &HomerService{
 				Name:  serviceName,
-				Icon:  ingress.Annotations["homer.service.icon"],
+				Icon:  annotations["homer.service.icon"],
 				Items: []HomerItem{*item},
+				Rank:  ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, "homer.service.rank", "0"))),
 			}
 		}
 	}
@@ -130,6 +146,7 @@ func fetchHomerConfig(clientset *kubernetes.Clientset) (HomerConfig, error) {
 		sortHomerItems(service.Items)
 		services = append(services, *service)
 	}
+	sortHomerServices(services)
 
 	return HomerConfig{Services: services}, nil
 }
