@@ -101,3 +101,14 @@ jobs:
           helm package ./charts/homer-operator -d ./artifacts
           CHART_NAME=$(ls ./artifacts | grep .tgz)
           helm push ./artifacts/$CHART_NAME oci://ghcr.io/${{ github.repository_owner }}/homer-operator
+
+      - name: Update Helm repository index
+        run: |
+          helm repo index artifacts --url https://arch-anes.github.io/homer-operator
+      
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: artifacts
+          publish_branch: gh-pages
