@@ -1,4 +1,7 @@
 # homer-operator
+
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/homer-operator)](https://artifacthub.io/packages/search?repo=homer-operator)
+
 A homer operator that automatically generated homer config
 
 # Installation
