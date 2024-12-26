@@ -8,7 +8,7 @@ A homer operator that automatically generated homer config
 
 ## Helm
 ```
-helm install homer-operator oci://ghcr.io/arch-anes/homer-operator/homer-operator --version 0.1.0
+helm install homer-operator oci://ghcr.io/arch-anes/homer-operator/homer-operator
 ```
 
 # How to
