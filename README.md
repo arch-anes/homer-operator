@@ -7,6 +7,14 @@ A homer operator that automatically generated homer config
 # Installation
 
 ## Helm
+
+### Repository
+```
+helm repo add homer-operator https://arch-anes.github.io/homer-operator
+helm install homer-operator homer-operator/homer-operator
+```
+
+### OCI
 ```
 helm install homer-operator oci://ghcr.io/arch-anes/homer-operator/homer-operator
 ```

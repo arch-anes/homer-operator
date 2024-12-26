@@ -101,3 +101,12 @@ jobs:
           helm package ./charts/homer-operator -d ./artifacts
           CHART_NAME=$(ls ./artifacts | grep .tgz)
           helm push ./artifacts/$CHART_NAME oci://ghcr.io/${{ github.repository_owner }}/homer-operator
+
+      - name: Update Helm repository
+        run: |
+          git checkout gh-pages || git checkout --orphan gh-pages
+          mv ./artifacts/* ./
+          helm repo index . --url https://arch-anes.github.io/homer-operator
+          git add .
+          git commit -m "Update Helm chart"
+          git push origin gh-pages
