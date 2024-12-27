@@ -3,7 +3,17 @@ entries:
   homer-operator:
   - apiVersion: v2
     appVersion: v24.12.1
-    created: "2024-12-26T15:53:53.409694097Z"
+    created: "2024-12-27T22:45:45.193051427Z"
+    description: A Helm chart for Homer Operator
+    digest: 60b5858558a9df1778c8656abde0004070bde9a402ae1ef7dd9482934cb5dda7
+    name: homer-operator
+    type: application
+    urls:
+    - https://arch-anes.github.io/homer-operator/homer-operator-0.1.3.tgz
+    version: 0.1.3
+  - apiVersion: v2
+    appVersion: v24.12.1
+    created: "2024-12-27T22:45:45.192676277Z"
     description: A Helm chart for Homer Operator
     digest: 0c079fe830c0f2e74e7a2451e9f6e3054590ceba2be0295881628d8e07dd57ae
     name: homer-operator
@@ -13,7 +23,7 @@ entries:
     version: 0.1.2
   - apiVersion: v2
     appVersion: v24.12.1
-    created: "2024-12-26T15:53:53.409117714Z"
+    created: "2024-12-27T22:45:45.192318208Z"
     description: A Helm chart for Homer Operator
     digest: f20e4a76a4054e887107e830f4c7ac94f1e8564722d7658d58df43f855fc06db
     name: homer-operator
@@ -23,7 +33,7 @@ entries:
     version: 0.1.1
   - apiVersion: v2
     appVersion: v24.12.1
-    created: "2024-12-26T15:53:53.408543565Z"
+    created: "2024-12-27T22:45:45.191943419Z"
     description: A Helm chart for Homer Operator
     digest: 458a868c88f67a9db2351b8c4263d93d90bb9bfed4d7b973253aa694b46c6e2a
     name: homer-operator
@@ -31,4 +41,4 @@ entries:
     urls:
     - https://arch-anes.github.io/homer-operator/homer-operator-0.1.0.tgz
     version: 0.1.0
-generated: "2024-12-26T15:53:53.407778638Z"
+generated: "2024-12-27T22:45:45.191410053Z"
