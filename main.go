@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"sort"
@@ -125,8 +126,7 @@ func fetchAllIngresses(clientset *kubernetes.Clientset) ([]networkingv1.Ingress,
 		options := metav1.ListOptions{Continue: continueToken}
 		ingressList, err := clientset.NetworkingV1().Ingresses("").List(context.TODO(), options)
 		if err != nil {
-			log.WithError(err).Error("Failed to list ingresses")
-			return nil, err
+			return nil, fmt.Errorf("failed to list ingresses: %w", err)
 		}
 
 		allIngresses = append(allIngresses, ingressList.Items...)
@@ -193,8 +193,7 @@ func fetchHomerConfig(clientset *kubernetes.Clientset) (HomerConfig, error) {
 func mergeWithBaseConfig(generatedConfig []byte) ([]byte, error) {
 	baseConfig, err := os.ReadFile(baseConfigFilePath)
 	if err != nil && !os.IsNotExist(err) {
-		log.WithError(err).Error("Failed to read base config")
-		return nil, err
+		return nil, fmt.Errorf("failed to read base config: %w", err)
 	}
 	return append(baseConfig, append([]byte(configSeparator), generatedConfig...)...), nil
 }
@@ -202,8 +201,7 @@ func mergeWithBaseConfig(generatedConfig []byte) ([]byte, error) {
 func writeToFile(config HomerConfig) error {
 	yamlData, err := yaml.Marshal(config)
 	if err != nil {
-		log.WithError(err).Error("Failed to marshal YAML")
-		return err
+		return fmt.Errorf("failed to marshal YAML: %w", err)
 	}
 
 	finalConfig, err := mergeWithBaseConfig(yamlData)
@@ -212,8 +210,7 @@ func writeToFile(config HomerConfig) error {
 	}
 
 	if err := os.WriteFile(configFilePath, finalConfig, 0644); err != nil {
-		log.WithError(err).Error("Failed to write YAML file")
-		return err
+		return fmt.Errorf("failed to write temporary YAML file: %w", err)
 	}
 
 	log.WithField("filePath", configFilePath).Info("YAML file updated")
