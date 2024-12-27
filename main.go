@@ -13,8 +13,12 @@ import (
 
 	"github.com/iancoleman/strcase"
 	"github.com/sirupsen/logrus"
+	traefikclientset "github.com/traefik/traefik/v3/pkg/provider/kubernetes/crd/generated/clientset/versioned"
+	traefikv1alpha1 "github.com/traefik/traefik/v3/pkg/provider/kubernetes/crd/traefikio/v1alpha1"
 	"gopkg.in/yaml.v3"
 	networkingv1 "k8s.io/api/networking/v1"
+	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
@@ -26,6 +30,22 @@ const (
 	configFilePath     = "/www/assets/config.yml"
 	baseConfigFilePath = "/www/assets/base_config.yml"
 	configSeparator    = "\n#Automatically generated config:\n"
+
+	// Annotation selectors
+	homerServiceName  = "homer.service.name"
+	homerServiceIcon  = "homer.service.icon"
+	homerServiceRank  = "homer.service.rank"
+	homerItemName     = "homer.item.name"
+	homerItemLogo     = "homer.item.logo"
+	homerItemURL      = "homer.item.url"
+	homerItemType     = "homer.item.type"
+	homerItemExcluded = "homer.item.excluded"
+	homerItemRank     = "homer.item.rank"
+
+	// Default values
+	defaultServiceName    = "default"
+	defaultExclusionState = "false"
+	defaultRank           = "0"
 )
 
 var log = logrus.New()
@@ -73,27 +93,59 @@ func deduceURL(ingress networkingv1.Ingress) string {
 	return ""
 }
 
-func extractHomerAnnotations(ingress networkingv1.Ingress) *HomerItem {
-	annotations := ingress.Annotations
+func deduceURLFromIngressRoute(ingressRoute traefikv1alpha1.IngressRoute) string {
+	if len(ingressRoute.Spec.Routes) > 0 && len(ingressRoute.Spec.Routes[0].Match) > 0 {
+		match := ingressRoute.Spec.Routes[0].Match
+		if strings.HasPrefix(match, "Host(`") && strings.HasSuffix(match, "`)") {
+			host := strings.TrimPrefix(match, "Host(`")
+			host = strings.TrimSuffix(host, "`)")
+			return "https://" + host
+		}
+	}
+	return ""
+}
+
+func extractHomerItemFromAnnotations(annotations map[string]string, name, url string, resourceName string, resourceType string) *HomerItem {
 	item := &HomerItem{
-		Name:     getAnnotationOrDefault(annotations, "homer.item.name", strcase.ToCamel(ingress.Name)),
-		Logo:     annotations["homer.item.logo"],
-		URL:      getAnnotationOrDefault(annotations, "homer.item.url", deduceURL(ingress)),
-		Type:     annotations["homer.item.type"],
-		Excluded: ignoreError(strconv.ParseBool(getAnnotationOrDefault(annotations, "homer.item.excluded", "false"))),
-		Rank:     ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, "homer.item.rank", "0"))),
+		Name:     getAnnotationOrDefault(annotations, homerItemName, strcase.ToCamel(name)),
+		Logo:     annotations[homerItemLogo],
+		URL:      getAnnotationOrDefault(annotations, homerItemURL, url),
+		Type:     annotations[homerItemType],
+		Excluded: ignoreError(strconv.ParseBool(getAnnotationOrDefault(annotations, homerItemExcluded, defaultExclusionState))),
+		Rank:     ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, homerItemRank, defaultRank))),
 	}
 
 	if item.Excluded {
-		log.WithField("ingress", ingress.Name).Info("Skipping excluded ingress")
+		log.WithField(resourceType, resourceName).Info("Skipping excluded resource")
 		return nil
 	}
 
 	if item.Name == "" || item.URL == "" {
-		log.WithField("ingress", ingress.Name).Warn("Skipping invalid ingress")
+		log.WithField(resourceType, resourceName).Warn("Skipping invalid resource")
 		return nil
 	}
+
 	return item
+}
+
+func extractHomerAnnotations(ingress networkingv1.Ingress) *HomerItem {
+	return extractHomerItemFromAnnotations(
+		ingress.Annotations,
+		ingress.Name,
+		deduceURL(ingress),
+		ingress.Name,
+		"ingress",
+	)
+}
+
+func extractHomerAnnotationsFromIngressRoute(ingressRoute traefikv1alpha1.IngressRoute) *HomerItem {
+	return extractHomerItemFromAnnotations(
+		ingressRoute.Annotations,
+		ingressRoute.Name,
+		deduceURLFromIngressRoute(ingressRoute),
+		ingressRoute.Name,
+		"ingressRoute",
+	)
 }
 
 func sortByRankAndName[T interface {
@@ -140,42 +192,134 @@ func fetchAllIngresses(clientset *kubernetes.Clientset) ([]networkingv1.Ingress,
 	return allIngresses, nil
 }
 
-func fetchHomerConfig(clientset *kubernetes.Clientset) (HomerConfig, error) {
-	ingresses, err := fetchAllIngresses(clientset)
-	if err != nil {
-		return HomerConfig{}, err
+func fetchAllIngressRoutes(traefikClient *traefikclientset.Clientset) ([]traefikv1alpha1.IngressRoute, error) {
+	var allIngressRoutes []traefikv1alpha1.IngressRoute
+	continueToken := ""
+
+	for {
+		options := metav1.ListOptions{Continue: continueToken}
+		ingressRouteList, err := traefikClient.TraefikV1alpha1().IngressRoutes("").List(context.TODO(), options)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list ingress routes: %w", err)
+		}
+
+		allIngressRoutes = append(allIngressRoutes, ingressRouteList.Items...)
+		if ingressRouteList.Continue == "" {
+			break
+		}
+		continueToken = ingressRouteList.Continue
 	}
 
+	log.Infof("Total ingress routes fetched: %d", len(allIngressRoutes))
+	return allIngressRoutes, nil
+}
+
+func checkCRDExists(clientset *apiextensionsclientset.Clientset, crdName string) (bool, error) {
+	_, err := clientset.ApiextensionsV1().CustomResourceDefinitions().Get(context.TODO(), crdName, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check CRD existence: %w", err)
+	}
+	return true, nil
+}
+
+func fetchHomerConfig(clientset *kubernetes.Clientset, crdClient *apiextensionsclientset.Clientset, traefikClient *traefikclientset.Clientset) (HomerConfig, error) {
+	ingresses, err := fetchAllIngresses(clientset)
+	if err != nil {
+		return HomerConfig{}, fmt.Errorf("failed to fetch ingresses: %w", err)
+	}
+
+	ingressRoutes, err := fetchIngressRoutesIfCRDExists(crdClient, traefikClient)
+	if err != nil {
+		return HomerConfig{}, fmt.Errorf("failed to fetch ingress routes: %w", err)
+	}
+
+	serviceMap := processResourcesToServiceMap(ingresses, ingressRoutes)
+	services := convertServiceMapToSortedServices(serviceMap)
+
+	return HomerConfig{Services: services}, nil
+}
+
+func fetchIngressRoutesIfCRDExists(crdClient *apiextensionsclientset.Clientset, traefikClient *traefikclientset.Clientset) ([]traefikv1alpha1.IngressRoute, error) {
+	crdExists, err := checkCRDExists(crdClient, "ingressroutes.traefik.io")
+	if err != nil {
+		return nil, fmt.Errorf("error checking CRD existence: %w", err)
+	}
+	if !crdExists {
+		log.Warn("Traefik CRDs not found. Skipping IngressRoute processing.")
+		return nil, nil
+	}
+
+	ingressRoutes, err := fetchAllIngressRoutes(traefikClient)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch ingress routes: %w", err)
+	}
+
+	return ingressRoutes, nil
+}
+
+func processResourcesToServiceMap(ingresses []networkingv1.Ingress, ingressRoutes []traefikv1alpha1.IngressRoute) map[string]*HomerService {
 	serviceMap := make(map[string]*HomerService)
 
 	for _, ingress := range ingresses {
-		log.WithField("ingress", ingress.Name).Debug("Processing ingress")
-		item := extractHomerAnnotations(ingress)
-		if item == nil {
-			continue
-		}
-
-		annotations := ingress.Annotations
-		service := &HomerService{
-			Name:  getAnnotationOrDefault(annotations, "homer.service.name", "default"),
-			Icon:  annotations["homer.service.icon"],
-			Items: []HomerItem{*item},
-			Rank:  ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, "homer.service.rank", "0"))),
-		}
-
-		if existingService, exists := serviceMap[service.Name]; exists {
-			existingService.Items = append(existingService.Items, *item)
-			if existingService.Icon == "" && service.Icon != "" {
-				existingService.Icon = service.Icon
-			}
-			if existingService.Rank == 0 && service.Rank != 0 {
-				existingService.Rank = service.Rank
-			}
-		} else {
-			serviceMap[service.Name] = service
-		}
+		processIngress(ingress, serviceMap)
 	}
 
+	for _, ingressRoute := range ingressRoutes {
+		processIngressRoute(ingressRoute, serviceMap)
+	}
+
+	return serviceMap
+}
+
+func processResource(
+	annotations map[string]string,
+	item *HomerItem,
+	serviceMap map[string]*HomerService,
+) {
+	if item == nil {
+		return
+	}
+
+	service := &HomerService{
+		Name:  getAnnotationOrDefault(annotations, homerServiceName, defaultServiceName),
+		Icon:  annotations[homerServiceIcon],
+		Items: []HomerItem{*item},
+		Rank:  ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, homerServiceRank, defaultRank))),
+	}
+
+	updateServiceMap(serviceMap, service)
+}
+
+func processIngress(ingress networkingv1.Ingress, serviceMap map[string]*HomerService) {
+	log.WithField("ingress", ingress.Name).Debug("Processing ingress")
+	item := extractHomerAnnotations(ingress)
+	processResource(ingress.Annotations, item, serviceMap)
+}
+
+func processIngressRoute(ingressRoute traefikv1alpha1.IngressRoute, serviceMap map[string]*HomerService) {
+	log.WithField("ingressRoute", ingressRoute.Name).Debug("Processing ingress route")
+	item := extractHomerAnnotationsFromIngressRoute(ingressRoute)
+	processResource(ingressRoute.Annotations, item, serviceMap)
+}
+
+func updateServiceMap(serviceMap map[string]*HomerService, service *HomerService) {
+	if existingService, exists := serviceMap[service.Name]; exists {
+		existingService.Items = append(existingService.Items, service.Items...)
+		if existingService.Icon == "" && service.Icon != "" {
+			existingService.Icon = service.Icon
+		}
+		if existingService.Rank == 0 && service.Rank != 0 {
+			existingService.Rank = service.Rank
+		}
+	} else {
+		serviceMap[service.Name] = service
+	}
+}
+
+func convertServiceMapToSortedServices(serviceMap map[string]*HomerService) []HomerService {
 	var services []HomerService
 	for _, service := range serviceMap {
 		if len(service.Items) == 0 {
@@ -186,8 +330,7 @@ func fetchHomerConfig(clientset *kubernetes.Clientset) (HomerConfig, error) {
 		services = append(services, *service)
 	}
 	sortByRankAndName(services)
-
-	return HomerConfig{Services: services}, nil
+	return services
 }
 
 func mergeWithBaseConfig(generatedConfig []byte) ([]byte, error) {
@@ -217,29 +360,63 @@ func writeToFile(config HomerConfig) error {
 	return nil
 }
 
-func watchIngresses(clientset *kubernetes.Clientset) {
-	watcher, err := clientset.NetworkingV1().Ingresses("").Watch(context.TODO(), metav1.ListOptions{})
+func watchIngresses(clientset *kubernetes.Clientset, crdClient *apiextensionsclientset.Clientset, traefikClient *traefikclientset.Clientset) {
+	ingressWatcher, err := clientset.NetworkingV1().Ingresses("").Watch(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		log.WithError(err).Error("Failed to start watching ingresses")
 		return
 	}
-	defer watcher.Stop()
+	defer ingressWatcher.Stop()
 
-	log.Info("Watching for ingress changes...")
+	var ingressRouteWatcher watch.Interface
+	crdExists, err := checkCRDExists(crdClient, "ingressroutes.traefik.io")
+	if err != nil {
+		log.WithError(err).Error("Error checking CRD existence")
+		return
+	}
+	if crdExists {
+		ingressRouteWatcher, err = traefikClient.TraefikV1alpha1().IngressRoutes("").Watch(context.TODO(), metav1.ListOptions{})
+		if err != nil {
+			log.WithError(err).Error("Failed to start watching ingress routes")
+			return
+		}
+		defer ingressRouteWatcher.Stop()
+	} else {
+		log.Warn("Traefik CRDs not found. Skipping IngressRoute watcher.")
+	}
 
-	for event := range watcher.ResultChan() {
-		if event.Type == watch.Added || event.Type == watch.Modified || event.Type == watch.Deleted {
-			log.WithField("eventType", event.Type).Info("Ingress event detected")
-			config, err := fetchHomerConfig(clientset)
-			if err != nil {
-				log.WithError(err).Error("Error fetching Homer config")
-				continue
+	log.Info("Watching for ingress and ingress route changes...")
+
+	for {
+		select {
+		case event := <-ingressWatcher.ResultChan():
+			if event.Type == watch.Added || event.Type == watch.Modified || event.Type == watch.Deleted {
+				log.WithField("eventType", event.Type).Info("Ingress event detected")
+				config, err := fetchHomerConfig(clientset, crdClient, traefikClient)
+				if err != nil {
+					log.WithError(err).Error("Error fetching Homer config")
+					continue
+				}
+				if err := writeToFile(config); err != nil {
+					log.WithError(err).Error("Error writing to file")
+				}
+			} else {
+				log.WithField("eventType", event.Type).Warn("Unhandled event type")
 			}
-			if err := writeToFile(config); err != nil {
-				log.WithError(err).Error("Error writing to file")
+		case event := <-ingressRouteWatcher.ResultChan():
+			if event.Type == watch.Added || event.Type == watch.Modified || event.Type == watch.Deleted {
+				log.WithField("eventType", event.Type).Info("IngressRoute event detected")
+				config, err := fetchHomerConfig(clientset, crdClient, traefikClient)
+				if err != nil {
+					log.WithError(err).Error("Error fetching Homer config")
+					continue
+				}
+				if err := writeToFile(config); err != nil {
+					log.WithError(err).Error("Error writing to file")
+				}
+			} else {
+				log.WithField("eventType", event.Type).Warn("Unhandled event type")
 			}
-		} else {
-			log.WithField("eventType", event.Type).Warn("Unhandled event type")
 		}
 	}
 }
@@ -267,8 +444,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	crdClient, err := apiextensionsclientset.NewForConfig(config)
+	if err != nil {
+		log.WithError(err).Error("Error creating CRD client")
+		os.Exit(1)
+	}
+
+	traefikClient, err := traefikclientset.NewForConfig(config)
+	if err != nil {
+		log.WithError(err).Error("Error creating Traefik client")
+		os.Exit(1)
+	}
+
 	go wait.Until(func() {
-		config, err := fetchHomerConfig(clientset)
+		config, err := fetchHomerConfig(clientset, crdClient, traefikClient)
 		if err != nil {
 			log.WithError(err).Error("Error during periodic refresh")
 			return
@@ -278,7 +467,7 @@ func main() {
 		}
 	}, 10*time.Minute, stopStructCh)
 
-	go watchIngresses(clientset)
+	go watchIngresses(clientset, crdClient, traefikClient)
 
 	<-stopStructCh
 }

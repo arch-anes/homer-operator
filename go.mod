@@ -4,10 +4,34 @@ go 1.23.4
 
 require (
 	github.com/sirupsen/logrus v1.9.3
+	github.com/traefik/traefik/v3 v3.2.3
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.32.0
+	k8s.io/apiextensions-apiserver v0.31.1
 	k8s.io/apimachinery v0.32.0
 	k8s.io/client-go v0.32.0
+)
+
+require (
+	github.com/aws/aws-sdk-go v1.44.327 // indirect
+	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
+	github.com/go-acme/lego/v4 v4.20.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.0.4 // indirect
+	github.com/go-kit/log v0.2.1 // indirect
+	github.com/go-logfmt/logfmt v0.5.1 // indirect
+	github.com/gorilla/mux v1.8.1 // indirect
+	github.com/http-wasm/http-wasm-host-go v0.7.0 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/miekg/dns v1.1.62 // indirect
+	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
+	github.com/rs/zerolog v1.29.0 // indirect
+	github.com/traefik/paerser v0.2.1 // indirect
+	golang.org/x/crypto v0.31.0 // indirect
+	golang.org/x/mod v0.21.0 // indirect
+	golang.org/x/sync v0.10.0 // indirect
+	golang.org/x/tools v0.26.0 // indirect
+	google.golang.org/grpc v1.67.1 // indirect
 )
 
 require (
