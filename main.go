@@ -50,14 +50,26 @@ type HomerConfig struct {
 }
 
 func init() {
-	log.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp: true,
-	})
+	log.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
 	log.SetLevel(logrus.InfoLevel)
 }
 
 func ignoreError[T any](val T, _ error) T {
 	return val
+}
+
+func getAnnotationOrDefault(annotations map[string]string, key, defaultValue string) string {
+	if val, exists := annotations[key]; exists {
+		return val
+	}
+	return defaultValue
+}
+
+func deduceURL(ingress networkingv1.Ingress) string {
+	if len(ingress.Spec.Rules) > 0 {
+		return "https://" + ingress.Spec.Rules[0].Host
+	}
+	return ""
 }
 
 func extractHomerAnnotations(ingress networkingv1.Ingress) *HomerItem {
@@ -83,78 +95,54 @@ func extractHomerAnnotations(ingress networkingv1.Ingress) *HomerItem {
 	return item
 }
 
-func getAnnotationOrDefault(annotations map[string]string, key, defaultValue string) string {
-	if val, exists := annotations[key]; exists {
-		return val
-	}
-	return defaultValue
-}
-
-func deduceURL(ingress networkingv1.Ingress) string {
-	if len(ingress.Spec.Rules) > 0 {
-		return "https://" + ingress.Spec.Rules[0].Host
-	}
-	return ""
-}
-
-func sortHomerItems(entries []HomerItem) {
+func sortByRankAndName[T interface {
+	GetRank() int
+	GetName() string
+}](entries []T) {
 	sort.SliceStable(entries, func(i, j int) bool {
-		if entries[i].Rank != 0 && entries[j].Rank != 0 {
-			return entries[i].Rank < entries[j].Rank
-		} else if entries[i].Rank != 0 {
+		if entries[i].GetRank() != 0 && entries[j].GetRank() != 0 {
+			return entries[i].GetRank() < entries[j].GetRank()
+		} else if entries[i].GetRank() != 0 {
 			return true
-		} else if entries[j].Rank != 0 {
+		} else if entries[j].GetRank() != 0 {
 			return false
 		}
-		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
+		return strings.ToLower(entries[i].GetName()) < strings.ToLower(entries[j].GetName())
 	})
 }
 
-func sortHomerServices(entries []HomerService) {
-	sort.SliceStable(entries, func(i, j int) bool {
-		if entries[i].Rank != 0 && entries[j].Rank != 0 {
-			return entries[i].Rank < entries[j].Rank
-		} else if entries[i].Rank != 0 {
-			return true
-		} else if entries[j].Rank != 0 {
-			return false
-		}
-		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
-	})
-}
+func (hi HomerItem) GetRank() int    { return hi.Rank }
+func (hi HomerItem) GetName() string { return hi.Name }
+
+func (hs HomerService) GetRank() int    { return hs.Rank }
+func (hs HomerService) GetName() string { return hs.Name }
 
 func fetchAllIngresses(clientset *kubernetes.Clientset) ([]networkingv1.Ingress, error) {
-    var allIngresses []networkingv1.Ingress
-    continueToken := ""
+	var allIngresses []networkingv1.Ingress
+	continueToken := ""
 
-    for {
-        options := metav1.ListOptions{}
-        if continueToken != "" {
-            options.Continue = continueToken
-        }
+	for {
+		options := metav1.ListOptions{Continue: continueToken}
+		ingressList, err := clientset.NetworkingV1().Ingresses("").List(context.TODO(), options)
+		if err != nil {
+			log.WithError(err).Error("Failed to list ingresses")
+			return nil, err
+		}
 
-        ingressList, err := clientset.NetworkingV1().Ingresses("").List(context.TODO(), options)
-        if err != nil {
-            log.WithError(err).Error("Failed to list ingresses")
-            return nil, err
-        }
+		allIngresses = append(allIngresses, ingressList.Items...)
+		if ingressList.Continue == "" {
+			break
+		}
+		continueToken = ingressList.Continue
+	}
 
-        allIngresses = append(allIngresses, ingressList.Items...)
-
-        if ingressList.Continue == "" {
-            break
-        }
-        continueToken = ingressList.Continue
-    }
-
-    log.Infof("Total ingresses fetched: %d", len(allIngresses))
-    return allIngresses, nil
+	log.Infof("Total ingresses fetched: %d", len(allIngresses))
+	return allIngresses, nil
 }
 
 func fetchHomerConfig(clientset *kubernetes.Clientset) (HomerConfig, error) {
 	ingresses, err := fetchAllIngresses(clientset)
 	if err != nil {
-		log.WithError(err).Error("Failed to list ingresses")
 		return HomerConfig{}, err
 	}
 
@@ -169,10 +157,10 @@ func fetchHomerConfig(clientset *kubernetes.Clientset) (HomerConfig, error) {
 
 		annotations := ingress.Annotations
 		service := &HomerService{
-			Name: getAnnotationOrDefault(annotations, "homer.service.name", "default"),
-			Icon: annotations["homer.service.icon"],
+			Name:  getAnnotationOrDefault(annotations, "homer.service.name", "default"),
+			Icon:  annotations["homer.service.icon"],
 			Items: []HomerItem{*item},
-			Rank: ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, "homer.service.rank", "0"))),
+			Rank:  ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, "homer.service.rank", "0"))),
 		}
 
 		if existingService, exists := serviceMap[service.Name]; exists {
@@ -194,25 +182,20 @@ func fetchHomerConfig(clientset *kubernetes.Clientset) (HomerConfig, error) {
 			log.WithField("service", service.Name).Warn("Skipping empty service")
 			continue
 		}
-		sortHomerItems(service.Items)
+		sortByRankAndName(service.Items)
 		services = append(services, *service)
 	}
-	sortHomerServices(services)
+	sortByRankAndName(services)
 
 	return HomerConfig{Services: services}, nil
 }
 
 func mergeWithBaseConfig(generatedConfig []byte) ([]byte, error) {
 	baseConfig, err := os.ReadFile(baseConfigFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			baseConfig = []byte("")
-		} else {
-			log.WithError(err).Error("Failed to read base config")
-			return nil, err
-		}
+	if err != nil && !os.IsNotExist(err) {
+		log.WithError(err).Error("Failed to read base config")
+		return nil, err
 	}
-
 	return append(baseConfig, append([]byte(configSeparator), generatedConfig...)...), nil
 }
 
@@ -225,15 +208,14 @@ func writeToFile(config HomerConfig) error {
 
 	finalConfig, err := mergeWithBaseConfig(yamlData)
 	if err != nil {
-		log.WithError(err).Error("Failed to merge configs")
 		return err
 	}
 
-	err = os.WriteFile(configFilePath, finalConfig, 0644)
-	if err != nil {
+	if err := os.WriteFile(configFilePath, finalConfig, 0644); err != nil {
 		log.WithError(err).Error("Failed to write YAML file")
 		return err
 	}
+
 	log.WithField("filePath", configFilePath).Info("YAML file updated")
 	return nil
 }
@@ -249,19 +231,17 @@ func watchIngresses(clientset *kubernetes.Clientset) {
 	log.Info("Watching for ingress changes...")
 
 	for event := range watcher.ResultChan() {
-		switch event.Type {
-		case watch.Added, watch.Modified, watch.Deleted:
+		if event.Type == watch.Added || event.Type == watch.Modified || event.Type == watch.Deleted {
 			log.WithField("eventType", event.Type).Info("Ingress event detected")
 			config, err := fetchHomerConfig(clientset)
 			if err != nil {
 				log.WithError(err).Error("Error fetching Homer config")
 				continue
 			}
-			err = writeToFile(config)
-			if err != nil {
+			if err := writeToFile(config); err != nil {
 				log.WithError(err).Error("Error writing to file")
 			}
-		default:
+		} else {
 			log.WithField("eventType", event.Type).Warn("Unhandled event type")
 		}
 	}
@@ -272,7 +252,6 @@ func main() {
 	signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)
 
 	stopStructCh := make(chan struct{})
-
 	go func() {
 		<-stopCh
 		close(stopStructCh)
@@ -297,8 +276,7 @@ func main() {
 			log.WithError(err).Error("Error during periodic refresh")
 			return
 		}
-		err = writeToFile(config)
-		if err != nil {
+		if err := writeToFile(config); err != nil {
 			log.WithError(err).Error("Error writing to file during periodic refresh")
 		}
 	}, 10*time.Minute, stopStructCh)
