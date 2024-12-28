@@ -4,6 +4,7 @@ go 1.23.4
 
 require (
 	github.com/sirupsen/logrus v1.9.3
+	github.com/stretchr/testify v1.9.0
 	github.com/traefik/traefik/v3 v3.2.3
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.32.0
@@ -25,6 +26,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/miekg/dns v1.1.62 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/rs/zerolog v1.29.0 // indirect
 	github.com/traefik/paerser v0.2.1 // indirect
 	golang.org/x/crypto v0.31.0 // indirect
