@@ -170,7 +170,7 @@ func (hi HomerItem) GetName() string { return hi.Name }
 func (hs HomerService) GetRank() int    { return hs.Rank }
 func (hs HomerService) GetName() string { return hs.Name }
 
-func fetchAllIngresses(clientset *kubernetes.Clientset) ([]networkingv1.Ingress, error) {
+func fetchAllIngresses(clientset kubernetes.Interface) ([]networkingv1.Ingress, error) {
 	var allIngresses []networkingv1.Ingress
 	continueToken := ""
 
@@ -192,7 +192,7 @@ func fetchAllIngresses(clientset *kubernetes.Clientset) ([]networkingv1.Ingress,
 	return allIngresses, nil
 }
 
-func fetchAllIngressRoutes(traefikClient *traefikclientset.Clientset) ([]traefikv1alpha1.IngressRoute, error) {
+func fetchAllIngressRoutes(traefikClient traefikclientset.Interface) ([]traefikv1alpha1.IngressRoute, error) {
 	var allIngressRoutes []traefikv1alpha1.IngressRoute
 	continueToken := ""
 
@@ -214,7 +214,7 @@ func fetchAllIngressRoutes(traefikClient *traefikclientset.Clientset) ([]traefik
 	return allIngressRoutes, nil
 }
 
-func checkCRDExists(clientset *apiextensionsclientset.Clientset, crdName string) (bool, error) {
+func checkCRDExists(clientset apiextensionsclientset.Interface, crdName string) (bool, error) {
 	_, err := clientset.ApiextensionsV1().CustomResourceDefinitions().Get(context.TODO(), crdName, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -225,7 +225,7 @@ func checkCRDExists(clientset *apiextensionsclientset.Clientset, crdName string)
 	return true, nil
 }
 
-func fetchHomerConfig(clientset *kubernetes.Clientset, crdClient *apiextensionsclientset.Clientset, traefikClient *traefikclientset.Clientset) (HomerConfig, error) {
+func fetchHomerConfig(clientset kubernetes.Interface, crdClient apiextensionsclientset.Interface, traefikClient traefikclientset.Interface) (HomerConfig, error) {
 	ingresses, err := fetchAllIngresses(clientset)
 	if err != nil {
 		return HomerConfig{}, fmt.Errorf("failed to fetch ingresses: %w", err)
@@ -242,7 +242,7 @@ func fetchHomerConfig(clientset *kubernetes.Clientset, crdClient *apiextensionsc
 	return HomerConfig{Services: services}, nil
 }
 
-func fetchIngressRoutesIfCRDExists(crdClient *apiextensionsclientset.Clientset, traefikClient *traefikclientset.Clientset) ([]traefikv1alpha1.IngressRoute, error) {
+func fetchIngressRoutesIfCRDExists(crdClient apiextensionsclientset.Interface, traefikClient traefikclientset.Interface) ([]traefikv1alpha1.IngressRoute, error) {
 	crdExists, err := checkCRDExists(crdClient, "ingressroutes.traefik.io")
 	if err != nil {
 		return nil, fmt.Errorf("error checking CRD existence: %w", err)
@@ -360,7 +360,7 @@ func writeToFile(config HomerConfig) error {
 	return nil
 }
 
-func watchIngresses(clientset *kubernetes.Clientset, crdClient *apiextensionsclientset.Clientset, traefikClient *traefikclientset.Clientset) {
+func watchIngresses(clientset kubernetes.Interface, crdClient apiextensionsclientset.Interface, traefikClient traefikclientset.Interface) {
 	ingressWatcher, err := clientset.NetworkingV1().Ingresses("").Watch(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		log.WithError(err).Error("Failed to start watching ingresses")
