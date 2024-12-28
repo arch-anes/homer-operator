@@ -1,52 +1,40 @@
-# homer-operator
+# Homer Operator
 
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/homer-operator)](https://artifacthub.io/packages/search?repo=homer-operator)
 
-A homer operator that automatically generated homer config
+The **Homer Operator** automatically generates and manages Homer configurations. 
 
-# Installation
+---
 
-## Helm
+## Installation
 
-### Repository
-```
-helm repo add homer-operator https://arch-anes.github.io/homer-operator
-helm install homer-operator homer-operator/homer-operator
-```
+### Using Helm
 
-### OCI
-```
-helm install homer-operator oci://ghcr.io/arch-anes/homer-operator/homer-operator
-```
+| **Method**       | **Command**                                                                                   |
+|------------------|-----------------------------------------------------------------------------------------------|
+| Add Repository   | `helm repo add homer-operator https://arch-anes.github.io/homer-operator`                     |
+| Install          | `helm install homer-operator homer-operator/homer-operator`                                   |
+| Install via OCI  | `helm install homer-operator oci://ghcr.io/arch-anes/homer-operator/homer-operator`           |
 
-# How to
+---
 
-The operator automatically picks up ingresses and add them to homer.
+## Usage
 
-To customize the behavior, add any of the following annotations to the list of the ingress' annotations.
+The operator automatically detects **Ingresses** and adds them to Homer. Customize its behavior by adding annotations to your Kubernetes `Ingress` or Traefik `IngressRoute`.
 
-## Category
+### Customizing Categories
 
-### Specify custom category (a.k.a service)
-To add an item under a category, add `homer.service.name: 'some category'` annotation.
+| **Annotation**               | **Description**                                                                      |
+|------------------------------|--------------------------------------------------------------------------------------|
+| `homer.service.name`         | Group items under a specific category (e.g., `homer.service.name: 'some category'`). |
+| `homer.service.icon`         | Set an icon for the category (e.g., `homer.service.icon: 'some icon'`).              |
 
-### Specify an icon for the category
-To specify an icon for the category, add `homer.service.icon: 'some icon'` annotation.
+### Customizing Items
 
-## Item
-
-### Exclude an ingress
-To exclude an ingress, add `homer.item.excluded: 'true'` annotation.
-
-### Rename an item
-By default, ingresses' names are used to deduce the name of a service's item in Homer.
-To override the behavior, add `homer.item.name: 'new name'`  annotation.
-
-### Specify a logo
-To specify a logo for the item, add `homer.item.logo: 'path-to-logo'` annotation.
-
-### Specify a type
-To specify a type for the item, add `homer.item.type: 'SomeType'` annotation.
-
-### Reorder items
-To reorder the items, add `homer.item.rank: 'position'` annotation.
+| **Annotation**               | **Description**                                                                   |
+|------------------------------|-----------------------------------------------------------------------------------|
+| `homer.item.excluded`        | Exclude an Ingress from appearing in Homer (e.g., `homer.item.excluded: 'true'`). |
+| `homer.item.name`            | Rename an item (e.g., `homer.item.name: 'new name'`).                             |
+| `homer.item.logo`            | Add a logo for the item (e.g., `homer.item.logo: 'path-to-logo'`).                |
+| `homer.item.type`            | Define the type of the item (e.g., `homer.item.type: 'SomeType'`).                |
+| `homer.item.rank`            | Reorder items (e.g., `homer.item.rank: 'position'`).                              |
