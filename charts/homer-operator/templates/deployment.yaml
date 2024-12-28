@@ -26,6 +26,7 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
+        {{- if .Values.operator.enabled }}
         - name: operator
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
@@ -39,6 +40,7 @@ spec:
             - name: config
               mountPath: /www/assets/base_config.yml
               subPath: base_config.yml
+        {{- end }}
         - name: homer
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
@@ -59,14 +61,23 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
+            {{- if .Values.operator.enabled }}
             - name: shared
               mountPath: /www/assets/
+            {{- else }}
+            - name: config
+              mountPath: /www/assets/config.yml
+              subPath: base_config.yml
+            {{- end }}
       volumes:
+        {{- if .Values.operator.enabled }}
         - name: shared
-          emptyDir: {}          
+          emptyDir: {}
+        {{- end }}
         - name: config
           configMap:
             name: {{ include "homer-operator.fullname" . }}
+      
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
