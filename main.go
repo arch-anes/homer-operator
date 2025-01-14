@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -475,6 +476,9 @@ func (op *Operator) runPeriodicRefresh(stopCh <-chan struct{}) {
 }
 
 func main() {
+	requireAnnotation := flag.Bool("require-annotation", true, "Require at least one Homer annotation for item generation.")
+	flag.Parse()
+
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -510,7 +514,7 @@ func main() {
 	}
 
 	operator := &Operator{
-		RequireAnnotation: true, // Set to true to enable the new mode
+		RequireAnnotation: *requireAnnotation,
 		Clientset:         clientset,
 		CRDClient:         crdClient,
 		TraefikClient:     traefikClient,
