@@ -18,12 +18,16 @@ func TestGetAnnotationOrDefault(t *testing.T) {
 		"key1": "value1",
 	}
 
-	assert.Equal(t, "value1", getAnnotationOrDefault(annotations, "key1", "default"))
+	operator := &Operator{RequireAnnotation: false}
 
-	assert.Equal(t, "default", getAnnotationOrDefault(annotations, "key2", "default"))
+	assert.Equal(t, "value1", operator.getAnnotationOrDefault(annotations, "key1", "default"))
+
+	assert.Equal(t, "default", operator.getAnnotationOrDefault(annotations, "key2", "default"))
 }
 
 func TestDeduceURL(t *testing.T) {
+	operator := &Operator{}
+
 	ingress := networkingv1.Ingress{
 		Spec: networkingv1.IngressSpec{
 			Rules: []networkingv1.IngressRule{
@@ -34,13 +38,15 @@ func TestDeduceURL(t *testing.T) {
 		},
 	}
 
-	assert.Equal(t, "https://example.com", deduceURL(ingress))
+	assert.Equal(t, "https://example.com", operator.deduceURL(ingress))
 
 	ingress.Spec.Rules = []networkingv1.IngressRule{}
-	assert.Equal(t, "", deduceURL(ingress))
+	assert.Equal(t, "", operator.deduceURL(ingress))
 }
 
 func TestDeduceURLFromIngressRoute(t *testing.T) {
+	operator := &Operator{}
+
 	ingressRoute := traefikv1alpha1.IngressRoute{
 		Spec: traefikv1alpha1.IngressRouteSpec{
 			Routes: []traefikv1alpha1.Route{
@@ -51,10 +57,10 @@ func TestDeduceURLFromIngressRoute(t *testing.T) {
 		},
 	}
 
-	assert.Equal(t, "https://example.com", deduceURLFromIngressRoute(ingressRoute))
+	assert.Equal(t, "https://example.com", operator.deduceURLFromIngressRoute(ingressRoute))
 
 	ingressRoute.Spec.Routes = []traefikv1alpha1.Route{}
-	assert.Equal(t, "", deduceURLFromIngressRoute(ingressRoute))
+	assert.Equal(t, "", operator.deduceURLFromIngressRoute(ingressRoute))
 }
 
 func TestExtractHomerItemFromAnnotations(t *testing.T) {
@@ -67,7 +73,9 @@ func TestExtractHomerItemFromAnnotations(t *testing.T) {
 		homerItemRank:     "5",
 	}
 
-	item := extractHomerItemFromAnnotations(annotations, "TestItem", "https://example.com", "TestItem", "ingress")
+	operator := &Operator{RequireAnnotation: false}
+
+	item := operator.extractHomerItemFromAnnotations(annotations, "TestItem", "https://example.com", "TestItem", "ingress")
 	assert.Equal(t, "TestItem", item.Name)
 	assert.Equal(t, "logo.png", item.Logo)
 	assert.Equal(t, "https://example.com", item.URL)
@@ -76,29 +84,58 @@ func TestExtractHomerItemFromAnnotations(t *testing.T) {
 	assert.Equal(t, 5, item.Rank)
 
 	annotations[homerItemExcluded] = "true"
-	item = extractHomerItemFromAnnotations(annotations, "TestItem", "https://example.com", "TestItem", "ingress")
+	item = operator.extractHomerItemFromAnnotations(annotations, "TestItem", "https://example.com", "TestItem", "ingress")
 	assert.Nil(t, item)
 
 	annotations[homerItemName] = ""
 	annotations[homerItemURL] = ""
-	item = extractHomerItemFromAnnotations(annotations, "TestItem", "https://example.com", "TestItem", "ingress")
+	item = operator.extractHomerItemFromAnnotations(annotations, "TestItem", "https://example.com", "TestItem", "ingress")
+	assert.Nil(t, item)
+}
+
+func TestExtractHomerItemFromAnnotations_WithRequireAnnotation(t *testing.T) {
+	annotations := map[string]string{
+		homerItemName:     "TestItem",
+		homerItemLogo:     "logo.png",
+		homerItemURL:      "https://example.com",
+		homerItemType:     "type",
+		homerItemExcluded: "false",
+		homerItemRank:     "5",
+	}
+
+	operator := &Operator{RequireAnnotation: true}
+
+	item := operator.extractHomerItemFromAnnotations(annotations, "TestItem", "https://example.com", "TestItem", "ingress")
+	assert.Equal(t, "TestItem", item.Name)
+}
+
+func TestExtractHomerItemFromAnnotations_WithoutAnnotations(t *testing.T) {
+	annotations := map[string]string{}
+
+	operator := &Operator{RequireAnnotation: true}
+
+	item := operator.extractHomerItemFromAnnotations(annotations, "TestItem", "https://example.com", "TestItem", "ingress")
 	assert.Nil(t, item)
 }
 
 func TestSortByRankAndName(t *testing.T) {
+	operator := &Operator{}
+
 	items := []HomerItem{
 		{Name: "B", Rank: 2},
 		{Name: "A", Rank: 1},
 		{Name: "C", Rank: 0},
 	}
 
-	sortByRankAndName(items)
+	operator.sortByRankAndName(items)
 	assert.Equal(t, "A", items[0].Name)
 	assert.Equal(t, "B", items[1].Name)
 	assert.Equal(t, "C", items[2].Name)
 }
 
 func TestUpdateServiceMap(t *testing.T) {
+	operator := &Operator{}
+
 	serviceMap := make(map[string]*HomerService)
 
 	service := &HomerService{
@@ -107,7 +144,7 @@ func TestUpdateServiceMap(t *testing.T) {
 		Items: []HomerItem{{Name: "Item1"}},
 		Rank:  1,
 	}
-	updateServiceMap(serviceMap, service)
+	operator.updateServiceMap(serviceMap, service)
 	assert.Equal(t, 1, len(serviceMap))
 	assert.Equal(t, "Service1", serviceMap["Service1"].Name)
 
@@ -117,48 +154,59 @@ func TestUpdateServiceMap(t *testing.T) {
 		Items: []HomerItem{{Name: "Item2"}},
 		Rank:  2,
 	}
-	updateServiceMap(serviceMap, service)
+	operator.updateServiceMap(serviceMap, service)
 	assert.Equal(t, 1, len(serviceMap))
 	assert.Equal(t, "icon1", serviceMap["Service1"].Icon)
 	assert.Equal(t, 2, len(serviceMap["Service1"].Items))
 }
 
 func TestConvertServiceMapToSortedServices(t *testing.T) {
+	operator := &Operator{}
+
 	serviceMap := map[string]*HomerService{
 		"Service2": {Name: "Service2", Rank: 2},
 		"Service1": {Name: "Service1", Rank: 1},
 	}
 
-	services := convertServiceMapToSortedServices(serviceMap)
-	assert.Equal(t, 0, len(services))
+	services := operator.convertServiceMapToSortedServices(serviceMap)
+	assert.Len(t, services, 2)
+	assert.Equal(t, "Service1", services[0].Name)
+	assert.Equal(t, "Service2", services[1].Name)
 }
 
 func TestMergeWithBaseConfig(t *testing.T) {
+	operator := &Operator{}
+
+	// Mock os.ReadFile by overriding the method if necessary
+	// For simplicity, this test assumes the base config does not exist
+
 	generatedConfig := []byte("generated config\n")
 
-	mergedConfig, err := mergeWithBaseConfig(generatedConfig)
+	finalConfig, err := operator.mergeWithBaseConfig(generatedConfig)
 	assert.NoError(t, err)
-	assert.Equal(t, "\n#Automatically generated config:\ngenerated config\n", string(mergedConfig))
-
-	mergedConfig, err = mergeWithBaseConfig(generatedConfig)
-	assert.NoError(t, err)
-	assert.Equal(t, "\n#Automatically generated config:\ngenerated config\n", string(mergedConfig))
+	assert.Equal(t, "\n#Automatically generated config:\ngenerated config\n", string(finalConfig))
 }
 
 func TestFetchAllIngresses(t *testing.T) {
-	mockClient := fake.NewSimpleClientset(&networkingv1.Ingress{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-ingress",
-		},
-	})
+	operator := &Operator{
+		Clientset: fake.NewSimpleClientset(&networkingv1.Ingress{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-ingress",
+			},
+		}),
+	}
 
-	ingresses, err := fetchAllIngresses(mockClient)
+	ingresses, err := operator.fetchAllIngresses()
 	assert.NoError(t, err)
 	assert.Len(t, ingresses, 1)
 	assert.Equal(t, "test-ingress", ingresses[0].Name)
 }
 
 func TestProcessIngress(t *testing.T) {
+	operator := &Operator{
+		RequireAnnotation: false,
+	}
+
 	ingress := networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-ingress",
@@ -177,7 +225,7 @@ func TestProcessIngress(t *testing.T) {
 	}
 
 	serviceMap := make(map[string]*HomerService)
-	processIngress(ingress, serviceMap)
+	operator.processIngress(ingress, serviceMap)
 
 	assert.Len(t, serviceMap, 1)
 	assert.Equal(t, "default", serviceMap["default"].Name)
@@ -186,35 +234,38 @@ func TestProcessIngress(t *testing.T) {
 }
 
 func TestIgnoreError(t *testing.T) {
-	value := ignoreError(strconv.Atoi("42"))
+	operator := &Operator{}
+
+	value := operator.ignoreError(strconv.Atoi("42"))
 	assert.Equal(t, 42, value)
 
-	value = ignoreError(strconv.Atoi("invalid"))
+	value = operator.ignoreError(strconv.Atoi("invalid"))
 	assert.Equal(t, 0, value)
 }
 
 func TestFetchHomerConfig(t *testing.T) {
-	mockClient := fake.NewSimpleClientset(&networkingv1.Ingress{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-ingress",
-			Annotations: map[string]string{
-				homerItemName: "TestItem",
-				homerItemURL:  "https://example.com",
-			},
-		},
-		Spec: networkingv1.IngressSpec{
-			Rules: []networkingv1.IngressRule{
-				{
-					Host: "example.com",
+	operator := &Operator{
+		Clientset:     fake.NewSimpleClientset(&networkingv1.Ingress{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-ingress",
+				Annotations: map[string]string{
+					homerItemName: "TestItem",
+					homerItemURL:  "https://example.com",
 				},
 			},
-		},
-	})
+			Spec: networkingv1.IngressSpec{
+				Rules: []networkingv1.IngressRule{
+					{
+						Host: "example.com",
+					},
+				},
+			},
+		}),
+		CRDClient:     apiextensionsfake.NewSimpleClientset(),
+		TraefikClient: traefikfake.NewSimpleClientset(),
+	}
 
-	crdClient := apiextensionsfake.NewSimpleClientset()
-	traefikClient := traefikfake.NewSimpleClientset()
-
-	config, err := fetchHomerConfig(mockClient, crdClient, traefikClient)
+	config, err := operator.fetchHomerConfig()
 	assert.NoError(t, err)
 	assert.Len(t, config.Services, 1)
 	assert.Equal(t, "default", config.Services[0].Name)
