@@ -42,6 +42,7 @@ const (
 	homerItemType     = "homer.item.type"
 	homerItemExcluded = "homer.item.excluded"
 	homerItemRank     = "homer.item.rank"
+	homerItemSubtitle = "homer.item.subtitle"
 
 	// Default values
 	defaultServiceName    = "default"
@@ -56,6 +57,7 @@ type HomerItem struct {
 	Logo     string `yaml:"logo"`
 	URL      string `yaml:"url"`
 	Type     string `yaml:"type"`
+	Subtitle string `yaml:"subtitle"`
 	Excluded bool   `yaml:"-"`
 	Rank     int    `yaml:"-"`
 }
@@ -124,6 +126,7 @@ func (op *Operator) extractHomerItemFromAnnotations(annotations map[string]strin
 		Logo:     annotations[homerItemLogo],
 		URL:      getAnnotationOrDefault(annotations, homerItemURL, url),
 		Type:     annotations[homerItemType],
+		Subtitle: annotations[homerItemSubtitle],
 		Excluded: ignoreError(strconv.ParseBool(getAnnotationOrDefault(annotations, homerItemExcluded, defaultExclusionState))),
 		Rank:     ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, homerItemRank, defaultRank))),
 	}
@@ -152,6 +155,7 @@ func hasHomerAnnotations(annotations map[string]string) bool {
 		homerItemType,
 		homerItemExcluded,
 		homerItemRank,
+		homerItemSubtitle,
 	}
 	for _, key := range keys {
 		if _, exists := annotations[key]; exists {

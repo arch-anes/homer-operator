@@ -99,12 +99,19 @@ func TestExtractHomerItemFromAnnotations_WithRequireAnnotation(t *testing.T) {
 		homerItemType:     "type",
 		homerItemExcluded: "false",
 		homerItemRank:     "5",
+		homerItemSubtitle: "subtitle",
 	}
 
 	operator := &Operator{RequireAnnotation: true}
 
 	item := operator.extractHomerItemFromAnnotations(annotations, "TestItem", "https://example.com", "TestItem", "ingress")
 	assert.Equal(t, "TestItem", item.Name)
+	assert.Equal(t, "logo.png", item.Logo)
+	assert.Equal(t, "https://example.com", item.URL)
+	assert.Equal(t, "type", item.Type)
+	assert.Equal(t, false, item.Excluded)
+	assert.Equal(t, 5, item.Rank)
+	assert.Equal(t, "subtitle", item.Subtitle)
 }
 
 func TestExtractHomerItemFromAnnotations_WithoutAnnotations(t *testing.T) {
