@@ -20,9 +20,9 @@ func TestGetAnnotationOrDefault(t *testing.T) {
 
 	operator := &Operator{RequireAnnotation: false}
 
-	assert.Equal(t, "value1", operator.getAnnotationOrDefault(annotations, "key1", "default"))
+	assert.Equal(t, "value1", getAnnotationOrDefault(annotations, "key1", "default"))
 
-	assert.Equal(t, "default", operator.getAnnotationOrDefault(annotations, "key2", "default"))
+	assert.Equal(t, "default", getAnnotationOrDefault(annotations, "key2", "default"))
 }
 
 func TestDeduceURL(t *testing.T) {
@@ -127,7 +127,7 @@ func TestSortByRankAndName(t *testing.T) {
 		{Name: "C", Rank: 0},
 	}
 
-	operator.sortByRankAndName(items)
+	sortByRankAndName(items)
 	assert.Equal(t, "A", items[0].Name)
 	assert.Equal(t, "B", items[1].Name)
 	assert.Equal(t, "C", items[2].Name)
@@ -236,10 +236,10 @@ func TestProcessIngress(t *testing.T) {
 func TestIgnoreError(t *testing.T) {
 	operator := &Operator{}
 
-	value := operator.ignoreError(strconv.Atoi("42"))
+	value := ignoreError(strconv.Atoi("42"))
 	assert.Equal(t, 42, value)
 
-	value = operator.ignoreError(strconv.Atoi("invalid"))
+	value = ignoreError(strconv.Atoi("invalid"))
 	assert.Equal(t, 0, value)
 }
 
