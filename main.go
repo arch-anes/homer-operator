@@ -180,7 +180,7 @@ func (op *Operator) extractHomerAnnotationsFromIngressRoute(ingressRoute traefik
 	)
 }
 
-func (op *Operator) sortByRankAndName[T interface {
+func sortByRankAndName[T interface {
 	GetRank() int
 	GetName() string
 }](entries []T) {
@@ -358,10 +358,10 @@ func (op *Operator) convertServiceMapToSortedServices(serviceMap map[string]*Hom
 			log.WithField("service", service.Name).Warn("Skipping empty service")
 			continue
 		}
-		op.sortByRankAndName(service.Items)
+		sortByRankAndName(service.Items)
 		services = append(services, *service)
 	}
-	op.sortByRankAndName(services)
+	sortByRankAndName(services)
 	return services
 }
 
