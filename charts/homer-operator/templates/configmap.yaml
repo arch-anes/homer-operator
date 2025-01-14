@@ -8,3 +8,7 @@ metadata:
 data:
   base_config.yml: |-
 {{ .Values.baseConfig | indent 4 }}
+{{ with .Values.extraCSS }}
+  extra.css: |-
+{{ . | indent 4 }}
+{{end}}
