@@ -1,11 +1,8 @@
 {
 	"name": "Homer operator devcontainer",
-	"image": "ghcr.io/arch-anes/dev-container-kubernetes-go:latest",
-	"runArgs": [
-		"--privileged",
-		"--volume=/var/run/docker.sock:/var/run/docker.sock",
-		"--network=host"
-	],
+	"dockerComposeFile": "./docker-compose.yml",
+	"service": "devcontainer",
+	"workspaceFolder": "/workspace",
 	"remoteUser": "vscode",
 	"customizations": {
 		"vscode": {
