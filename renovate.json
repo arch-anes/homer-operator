@@ -3,6 +3,19 @@
   "extends": [
     "config:recommended"
   ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "fileMatch": [
+        "^charts\\/homer-operator\\/Chart\\.yaml$"
+      ],
+      "matchStrings": [
+        "appVersion:\\s+(?<currentValue>.*)"
+      ],
+      "depNameTemplate": "b4bz/homer",
+      "datasourceTemplate": "docker"
+    }
+  ],
   "packageRules": [
     {
       "matchManagers": [
@@ -22,6 +35,21 @@
       ],
       "enabled": true,
       "groupName": "Helm dependencies"
+    },
+    {
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "matchUpdateTypes": [
+        "major",
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ],
+      "matchDatasources": [
+        "docker"
+      ]
     }
   ]
 }
