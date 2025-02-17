@@ -31,6 +31,12 @@ fullnameOverride: ""
 baseConfig: |-
   # Add your base homer config here
   # ref: https://github.com/bastienwirtz/homer/blob/main/docs/configuration.md
+  stylesheet:
+    - /www/assets/extra.css
+
+extraCSS: |-
+  /* Add your custom CSS here */
+
 
 #This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/
 serviceAccount:

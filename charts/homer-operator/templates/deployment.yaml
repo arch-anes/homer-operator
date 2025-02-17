@@ -40,6 +40,9 @@ spec:
             - name: config
               mountPath: /www/assets/base_config.yml
               subPath: base_config.yml
+            - name: config
+              mountPath: /www/assets/extra.css
+              subPath: extra.css
         {{- end }}
         - name: homer
           securityContext:
@@ -64,10 +67,16 @@ spec:
             {{- if .Values.operator.enabled }}
             - name: shared
               mountPath: /www/assets/
+            - name: config
+              mountPath: /www/assets/extra.css
+              subPath: extra.css
             {{- else }}
             - name: config
               mountPath: /www/assets/config.yml
               subPath: base_config.yml
+            - name: config
+              mountPath: /www/assets/extra.css
+              subPath: extra.css
             {{- end }}
       volumes:
         {{- if .Values.operator.enabled }}
