@@ -1,6 +1,6 @@
 # homer-operator
 
-![Version: 0.1.14](https://img.shields.io/badge/Version-0.1.14-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v25.03.2](https://img.shields.io/badge/AppVersion-v25.03.2-informational?style=flat-square)
+![Version: 0.1.15](https://img.shields.io/badge/Version-0.1.15-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v25.03.3](https://img.shields.io/badge/AppVersion-v25.03.3-informational?style=flat-square)
 
 A Helm chart for Homer Operator
 
