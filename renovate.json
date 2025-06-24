@@ -6,8 +6,8 @@
   "customManagers": [
     {
       "customType": "regex",
-      "fileMatch": [
-        "^charts\\/homer-operator\\/Chart\\.yaml$"
+      "managerFilePatterns": [
+        "/^charts\\/homer-operator\\/Chart\\.yaml$/"
       ],
       "matchStrings": [
         "appVersion:\\s+(?<currentValue>.*)"
