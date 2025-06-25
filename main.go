@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -41,6 +42,7 @@ const (
 	homerItemType     = "homer.item.type"
 	homerItemExcluded = "homer.item.excluded"
 	homerItemRank     = "homer.item.rank"
+	homerItemSubtitle = "homer.item.subtitle"
 
 	// Default values
 	defaultServiceName    = "default"
@@ -55,6 +57,7 @@ type HomerItem struct {
 	Logo     string `yaml:"logo"`
 	URL      string `yaml:"url"`
 	Type     string `yaml:"type"`
+	Subtitle string `yaml:"subtitle"`
 	Excluded bool   `yaml:"-"`
 	Rank     int    `yaml:"-"`
 }
@@ -68,6 +71,13 @@ type HomerService struct {
 
 type HomerConfig struct {
 	Services []HomerService `yaml:"services"`
+}
+
+type Operator struct {
+	RequireAnnotation bool
+	Clientset         kubernetes.Interface
+	CRDClient         apiextensionsclientset.Interface
+	TraefikClient     traefikclientset.Interface
 }
 
 func init() {
@@ -86,14 +96,14 @@ func getAnnotationOrDefault(annotations map[string]string, key, defaultValue str
 	return defaultValue
 }
 
-func deduceURL(ingress networkingv1.Ingress) string {
+func (op *Operator) deduceURL(ingress networkingv1.Ingress) string {
 	if len(ingress.Spec.Rules) > 0 {
 		return "https://" + ingress.Spec.Rules[0].Host
 	}
 	return ""
 }
 
-func deduceURLFromIngressRoute(ingressRoute traefikv1alpha1.IngressRoute) string {
+func (op *Operator) deduceURLFromIngressRoute(ingressRoute traefikv1alpha1.IngressRoute) string {
 	if len(ingressRoute.Spec.Routes) > 0 && len(ingressRoute.Spec.Routes[0].Match) > 0 {
 		match := ingressRoute.Spec.Routes[0].Match
 		if strings.HasPrefix(match, "Host(`") && strings.HasSuffix(match, "`)") {
@@ -105,12 +115,18 @@ func deduceURLFromIngressRoute(ingressRoute traefikv1alpha1.IngressRoute) string
 	return ""
 }
 
-func extractHomerItemFromAnnotations(annotations map[string]string, name, url string, resourceName string, resourceType string) *HomerItem {
+func (op *Operator) extractHomerItemFromAnnotations(annotations map[string]string, name, url string, resourceName string, resourceType string) *HomerItem {
+	if op.RequireAnnotation && !hasHomerAnnotations(annotations) {
+		log.WithField(resourceType, resourceName).Info("No homer annotations found; skipping resource")
+		return nil
+	}
+
 	item := &HomerItem{
 		Name:     getAnnotationOrDefault(annotations, homerItemName, strcase.ToCamel(name)),
 		Logo:     annotations[homerItemLogo],
 		URL:      getAnnotationOrDefault(annotations, homerItemURL, url),
 		Type:     annotations[homerItemType],
+		Subtitle: annotations[homerItemSubtitle],
 		Excluded: ignoreError(strconv.ParseBool(getAnnotationOrDefault(annotations, homerItemExcluded, defaultExclusionState))),
 		Rank:     ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, homerItemRank, defaultRank))),
 	}
@@ -128,21 +144,42 @@ func extractHomerItemFromAnnotations(annotations map[string]string, name, url st
 	return item
 }
 
-func extractHomerAnnotations(ingress networkingv1.Ingress) *HomerItem {
-	return extractHomerItemFromAnnotations(
+func hasHomerAnnotations(annotations map[string]string) bool {
+	keys := []string{
+		homerServiceName,
+		homerServiceIcon,
+		homerServiceRank,
+		homerItemName,
+		homerItemLogo,
+		homerItemURL,
+		homerItemType,
+		homerItemExcluded,
+		homerItemRank,
+		homerItemSubtitle,
+	}
+	for _, key := range keys {
+		if _, exists := annotations[key]; exists {
+			return true
+		}
+	}
+	return false
+}
+
+func (op *Operator) extractHomerAnnotations(ingress networkingv1.Ingress) *HomerItem {
+	return op.extractHomerItemFromAnnotations(
 		ingress.Annotations,
 		ingress.Name,
-		deduceURL(ingress),
+		op.deduceURL(ingress),
 		ingress.Name,
 		"ingress",
 	)
 }
 
-func extractHomerAnnotationsFromIngressRoute(ingressRoute traefikv1alpha1.IngressRoute) *HomerItem {
-	return extractHomerItemFromAnnotations(
+func (op *Operator) extractHomerAnnotationsFromIngressRoute(ingressRoute traefikv1alpha1.IngressRoute) *HomerItem {
+	return op.extractHomerItemFromAnnotations(
 		ingressRoute.Annotations,
 		ingressRoute.Name,
-		deduceURLFromIngressRoute(ingressRoute),
+		op.deduceURLFromIngressRoute(ingressRoute),
 		ingressRoute.Name,
 		"ingressRoute",
 	)
@@ -170,13 +207,13 @@ func (hi HomerItem) GetName() string { return hi.Name }
 func (hs HomerService) GetRank() int    { return hs.Rank }
 func (hs HomerService) GetName() string { return hs.Name }
 
-func fetchAllIngresses(clientset kubernetes.Interface) ([]networkingv1.Ingress, error) {
+func (op *Operator) fetchAllIngresses() ([]networkingv1.Ingress, error) {
 	var allIngresses []networkingv1.Ingress
 	continueToken := ""
 
 	for {
 		options := metav1.ListOptions{Continue: continueToken}
-		ingressList, err := clientset.NetworkingV1().Ingresses("").List(context.TODO(), options)
+		ingressList, err := op.Clientset.NetworkingV1().Ingresses("").List(context.TODO(), options)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list ingresses: %w", err)
 		}
@@ -192,13 +229,13 @@ func fetchAllIngresses(clientset kubernetes.Interface) ([]networkingv1.Ingress, 
 	return allIngresses, nil
 }
 
-func fetchAllIngressRoutes(traefikClient traefikclientset.Interface) ([]traefikv1alpha1.IngressRoute, error) {
+func (op *Operator) fetchAllIngressRoutes() ([]traefikv1alpha1.IngressRoute, error) {
 	var allIngressRoutes []traefikv1alpha1.IngressRoute
 	continueToken := ""
 
 	for {
 		options := metav1.ListOptions{Continue: continueToken}
-		ingressRouteList, err := traefikClient.TraefikV1alpha1().IngressRoutes("").List(context.TODO(), options)
+		ingressRouteList, err := op.TraefikClient.TraefikV1alpha1().IngressRoutes("").List(context.TODO(), options)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list ingress routes: %w", err)
 		}
@@ -214,8 +251,8 @@ func fetchAllIngressRoutes(traefikClient traefikclientset.Interface) ([]traefikv
 	return allIngressRoutes, nil
 }
 
-func checkCRDExists(clientset apiextensionsclientset.Interface, crdName string) (bool, error) {
-	_, err := clientset.ApiextensionsV1().CustomResourceDefinitions().Get(context.TODO(), crdName, metav1.GetOptions{})
+func (op *Operator) checkCRDExists(crdName string) (bool, error) {
+	_, err := op.CRDClient.ApiextensionsV1().CustomResourceDefinitions().Get(context.TODO(), crdName, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return false, nil
@@ -225,25 +262,25 @@ func checkCRDExists(clientset apiextensionsclientset.Interface, crdName string) 
 	return true, nil
 }
 
-func fetchHomerConfig(clientset kubernetes.Interface, crdClient apiextensionsclientset.Interface, traefikClient traefikclientset.Interface) (HomerConfig, error) {
-	ingresses, err := fetchAllIngresses(clientset)
+func (op *Operator) fetchHomerConfig() (HomerConfig, error) {
+	ingresses, err := op.fetchAllIngresses()
 	if err != nil {
 		return HomerConfig{}, fmt.Errorf("failed to fetch ingresses: %w", err)
 	}
 
-	ingressRoutes, err := fetchIngressRoutesIfCRDExists(crdClient, traefikClient)
+	ingressRoutes, err := op.fetchIngressRoutesIfCRDExists()
 	if err != nil {
 		return HomerConfig{}, fmt.Errorf("failed to fetch ingress routes: %w", err)
 	}
 
-	serviceMap := processResourcesToServiceMap(ingresses, ingressRoutes)
-	services := convertServiceMapToSortedServices(serviceMap)
+	serviceMap := op.processResourcesToServiceMap(ingresses, ingressRoutes)
+	services := op.convertServiceMapToSortedServices(serviceMap)
 
 	return HomerConfig{Services: services}, nil
 }
 
-func fetchIngressRoutesIfCRDExists(crdClient apiextensionsclientset.Interface, traefikClient traefikclientset.Interface) ([]traefikv1alpha1.IngressRoute, error) {
-	crdExists, err := checkCRDExists(crdClient, "ingressroutes.traefik.io")
+func (op *Operator) fetchIngressRoutesIfCRDExists() ([]traefikv1alpha1.IngressRoute, error) {
+	crdExists, err := op.checkCRDExists("ingressroutes.traefik.io")
 	if err != nil {
 		return nil, fmt.Errorf("error checking CRD existence: %w", err)
 	}
@@ -252,7 +289,7 @@ func fetchIngressRoutesIfCRDExists(crdClient apiextensionsclientset.Interface, t
 		return nil, nil
 	}
 
-	ingressRoutes, err := fetchAllIngressRoutes(traefikClient)
+	ingressRoutes, err := op.fetchAllIngressRoutes()
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch ingress routes: %w", err)
 	}
@@ -260,21 +297,21 @@ func fetchIngressRoutesIfCRDExists(crdClient apiextensionsclientset.Interface, t
 	return ingressRoutes, nil
 }
 
-func processResourcesToServiceMap(ingresses []networkingv1.Ingress, ingressRoutes []traefikv1alpha1.IngressRoute) map[string]*HomerService {
+func (op *Operator) processResourcesToServiceMap(ingresses []networkingv1.Ingress, ingressRoutes []traefikv1alpha1.IngressRoute) map[string]*HomerService {
 	serviceMap := make(map[string]*HomerService)
 
 	for _, ingress := range ingresses {
-		processIngress(ingress, serviceMap)
+		op.processIngress(ingress, serviceMap)
 	}
 
 	for _, ingressRoute := range ingressRoutes {
-		processIngressRoute(ingressRoute, serviceMap)
+		op.processIngressRoute(ingressRoute, serviceMap)
 	}
 
 	return serviceMap
 }
 
-func processResource(
+func (op *Operator) processResource(
 	annotations map[string]string,
 	item *HomerItem,
 	serviceMap map[string]*HomerService,
@@ -290,22 +327,22 @@ func processResource(
 		Rank:  ignoreError(strconv.Atoi(getAnnotationOrDefault(annotations, homerServiceRank, defaultRank))),
 	}
 
-	updateServiceMap(serviceMap, service)
+	op.updateServiceMap(serviceMap, service)
 }
 
-func processIngress(ingress networkingv1.Ingress, serviceMap map[string]*HomerService) {
+func (op *Operator) processIngress(ingress networkingv1.Ingress, serviceMap map[string]*HomerService) {
 	log.WithField("ingress", ingress.Name).Debug("Processing ingress")
-	item := extractHomerAnnotations(ingress)
-	processResource(ingress.Annotations, item, serviceMap)
+	item := op.extractHomerAnnotations(ingress)
+	op.processResource(ingress.Annotations, item, serviceMap)
 }
 
-func processIngressRoute(ingressRoute traefikv1alpha1.IngressRoute, serviceMap map[string]*HomerService) {
+func (op *Operator) processIngressRoute(ingressRoute traefikv1alpha1.IngressRoute, serviceMap map[string]*HomerService) {
 	log.WithField("ingressRoute", ingressRoute.Name).Debug("Processing ingress route")
-	item := extractHomerAnnotationsFromIngressRoute(ingressRoute)
-	processResource(ingressRoute.Annotations, item, serviceMap)
+	item := op.extractHomerAnnotationsFromIngressRoute(ingressRoute)
+	op.processResource(ingressRoute.Annotations, item, serviceMap)
 }
 
-func updateServiceMap(serviceMap map[string]*HomerService, service *HomerService) {
+func (op *Operator) updateServiceMap(serviceMap map[string]*HomerService, service *HomerService) {
 	if existingService, exists := serviceMap[service.Name]; exists {
 		existingService.Items = append(existingService.Items, service.Items...)
 		if existingService.Icon == "" && service.Icon != "" {
@@ -319,7 +356,7 @@ func updateServiceMap(serviceMap map[string]*HomerService, service *HomerService
 	}
 }
 
-func convertServiceMapToSortedServices(serviceMap map[string]*HomerService) []HomerService {
+func (op *Operator) convertServiceMapToSortedServices(serviceMap map[string]*HomerService) []HomerService {
 	var services []HomerService
 	for _, service := range serviceMap {
 		if len(service.Items) == 0 {
@@ -333,7 +370,7 @@ func convertServiceMapToSortedServices(serviceMap map[string]*HomerService) []Ho
 	return services
 }
 
-func mergeWithBaseConfig(generatedConfig []byte) ([]byte, error) {
+func (op *Operator) mergeWithBaseConfig(generatedConfig []byte) ([]byte, error) {
 	baseConfig, err := os.ReadFile(baseConfigFilePath)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("failed to read base config: %w", err)
@@ -341,13 +378,13 @@ func mergeWithBaseConfig(generatedConfig []byte) ([]byte, error) {
 	return append(baseConfig, append([]byte(configSeparator), generatedConfig...)...), nil
 }
 
-func writeToFile(config HomerConfig) error {
+func (op *Operator) writeToFile(config HomerConfig) error {
 	yamlData, err := yaml.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal YAML: %w", err)
 	}
 
-	finalConfig, err := mergeWithBaseConfig(yamlData)
+	finalConfig, err := op.mergeWithBaseConfig(yamlData)
 	if err != nil {
 		return err
 	}
@@ -360,8 +397,8 @@ func writeToFile(config HomerConfig) error {
 	return nil
 }
 
-func watchIngresses(clientset kubernetes.Interface, crdClient apiextensionsclientset.Interface, traefikClient traefikclientset.Interface) {
-	ingressWatcher, err := clientset.NetworkingV1().Ingresses("").Watch(context.TODO(), metav1.ListOptions{})
+func (op *Operator) watchIngresses() {
+	ingressWatcher, err := op.Clientset.NetworkingV1().Ingresses("").Watch(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		log.WithError(err).Error("Failed to start watching ingresses")
 		return
@@ -369,13 +406,13 @@ func watchIngresses(clientset kubernetes.Interface, crdClient apiextensionsclien
 	defer ingressWatcher.Stop()
 
 	var ingressRouteWatcher watch.Interface
-	crdExists, err := checkCRDExists(crdClient, "ingressroutes.traefik.io")
+	crdExists, err := op.checkCRDExists("ingressroutes.traefik.io")
 	if err != nil {
 		log.WithError(err).Error("Error checking CRD existence")
 		return
 	}
 	if crdExists {
-		ingressRouteWatcher, err = traefikClient.TraefikV1alpha1().IngressRoutes("").Watch(context.TODO(), metav1.ListOptions{})
+		ingressRouteWatcher, err = op.TraefikClient.TraefikV1alpha1().IngressRoutes("").Watch(context.TODO(), metav1.ListOptions{})
 		if err != nil {
 			log.WithError(err).Error("Failed to start watching ingress routes")
 			return
@@ -389,29 +426,37 @@ func watchIngresses(clientset kubernetes.Interface, crdClient apiextensionsclien
 
 	for {
 		select {
-		case event := <-ingressWatcher.ResultChan():
+		case event, ok := <-ingressWatcher.ResultChan():
+			if !ok {
+				log.Warn("Ingress watcher channel closed")
+				return
+			}
 			if event.Type == watch.Added || event.Type == watch.Modified || event.Type == watch.Deleted {
 				log.WithField("eventType", event.Type).Info("Ingress event detected")
-				config, err := fetchHomerConfig(clientset, crdClient, traefikClient)
+				config, err := op.fetchHomerConfig()
 				if err != nil {
 					log.WithError(err).Error("Error fetching Homer config")
 					continue
 				}
-				if err := writeToFile(config); err != nil {
+				if err := op.writeToFile(config); err != nil {
 					log.WithError(err).Error("Error writing to file")
 				}
 			} else {
 				log.WithField("eventType", event.Type).Warn("Unhandled event type")
 			}
-		case event := <-ingressRouteWatcher.ResultChan():
+		case event, ok := <-ingressRouteWatcher.ResultChan():
+			if !ok {
+				log.Warn("IngressRoute watcher channel closed")
+				return
+			}
 			if event.Type == watch.Added || event.Type == watch.Modified || event.Type == watch.Deleted {
 				log.WithField("eventType", event.Type).Info("IngressRoute event detected")
-				config, err := fetchHomerConfig(clientset, crdClient, traefikClient)
+				config, err := op.fetchHomerConfig()
 				if err != nil {
 					log.WithError(err).Error("Error fetching Homer config")
 					continue
 				}
-				if err := writeToFile(config); err != nil {
+				if err := op.writeToFile(config); err != nil {
 					log.WithError(err).Error("Error writing to file")
 				}
 			} else {
@@ -421,7 +466,23 @@ func watchIngresses(clientset kubernetes.Interface, crdClient apiextensionsclien
 	}
 }
 
+func (op *Operator) runPeriodicRefresh(stopCh <-chan struct{}) {
+	wait.Until(func() {
+		config, err := op.fetchHomerConfig()
+		if err != nil {
+			log.WithError(err).Error("Error during periodic refresh")
+			return
+		}
+		if err := op.writeToFile(config); err != nil {
+			log.WithError(err).Error("Error writing to file during periodic refresh")
+		}
+	}, 10*time.Minute, stopCh)
+}
+
 func main() {
+	requireAnnotation := flag.Bool("require-annotation", true, "Require at least one Homer annotation for item generation.")
+	flag.Parse()
+
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -456,18 +517,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	go wait.Until(func() {
-		config, err := fetchHomerConfig(clientset, crdClient, traefikClient)
-		if err != nil {
-			log.WithError(err).Error("Error during periodic refresh")
-			return
-		}
-		if err := writeToFile(config); err != nil {
-			log.WithError(err).Error("Error writing to file during periodic refresh")
-		}
-	}, 10*time.Minute, stopStructCh)
+	operator := &Operator{
+		RequireAnnotation: *requireAnnotation,
+		Clientset:         clientset,
+		CRDClient:         crdClient,
+		TraefikClient:     traefikClient,
+	}
 
-	go watchIngresses(clientset, crdClient, traefikClient)
+	go operator.runPeriodicRefresh(stopStructCh)
+
+	go operator.watchIngresses()
 
 	<-stopStructCh
 }
