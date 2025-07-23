@@ -360,65 +360,92 @@ func writeToFile(config HomerConfig) error {
 	return nil
 }
 
-func watchIngresses(clientset kubernetes.Interface, crdClient apiextensionsclientset.Interface, traefikClient traefikclientset.Interface) {
-	ingressWatcher, err := clientset.NetworkingV1().Ingresses("").Watch(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		log.WithError(err).Error("Failed to start watching ingresses")
-		return
-	}
-	defer ingressWatcher.Stop()
+func runWatcherLoop(
+	resourceName string,
+	createWatcher func() (watch.Interface, error),
+	handleEvent func(resourceName string, event watch.Event),
+	stopCh <-chan struct{},
+) {
+	go func() {
+		for {
+			select {
+			case <-stopCh:
+				log.Infof("%s watcher shutting down", resourceName)
+				return
+			default:
+			}
 
-	var ingressRouteWatcher watch.Interface
-	crdExists, err := checkCRDExists(crdClient, "ingressroutes.traefik.io")
-	if err != nil {
-		log.WithError(err).Error("Error checking CRD existence")
-		return
-	}
-	if crdExists {
-		ingressRouteWatcher, err = traefikClient.TraefikV1alpha1().IngressRoutes("").Watch(context.TODO(), metav1.ListOptions{})
+			watcher, err := createWatcher()
+			if err != nil {
+				log.WithError(err).Errorf("Failed to create %s watcher, retrying in 5s", resourceName)
+				time.Sleep(5 * time.Second)
+				continue
+			}
+
+			if watcher == nil {
+				log.Debugf("Watcher for %s not instantiated", resourceName)
+				time.Sleep(5 * time.Second)
+				continue
+			}
+
+			log.Infof("Started %s watcher", resourceName)
+			for event := range watcher.ResultChan() {
+				if event.Type == "" || event.Object == nil {
+					log.Warnf("%s watcher channel closed, restarting", resourceName)
+					break
+				}
+				handleEvent(resourceName, event)
+			}
+
+			watcher.Stop()
+			time.Sleep(2 * time.Second)
+		}
+	}()
+}
+
+func watchIngresses(
+	clientset kubernetes.Interface,
+	crdClient apiextensionsclientset.Interface,
+	traefikClient traefikclientset.Interface,
+	stopCh <-chan struct{},
+) {
+	eventHandler := func(resourceName string, event watch.Event) {
+		log.WithField("eventType", event.Type).Infof("%s event detected", resourceName)
+		config, err := fetchHomerConfig(clientset, crdClient, traefikClient)
 		if err != nil {
-			log.WithError(err).Error("Failed to start watching ingress routes")
+			log.WithError(err).Error("Error fetching Homer config")
 			return
 		}
-		defer ingressRouteWatcher.Stop()
-	} else {
-		log.Warn("Traefik CRDs not found. Skipping IngressRoute watcher.")
-	}
-
-	log.Info("Watching for ingress and ingress route changes...")
-
-	for {
-		select {
-		case event := <-ingressWatcher.ResultChan():
-			if event.Type == watch.Added || event.Type == watch.Modified || event.Type == watch.Deleted {
-				log.WithField("eventType", event.Type).Info("Ingress event detected")
-				config, err := fetchHomerConfig(clientset, crdClient, traefikClient)
-				if err != nil {
-					log.WithError(err).Error("Error fetching Homer config")
-					continue
-				}
-				if err := writeToFile(config); err != nil {
-					log.WithError(err).Error("Error writing to file")
-				}
-			} else {
-				log.WithField("eventType", event.Type).Warn("Unhandled event type")
-			}
-		case event := <-ingressRouteWatcher.ResultChan():
-			if event.Type == watch.Added || event.Type == watch.Modified || event.Type == watch.Deleted {
-				log.WithField("eventType", event.Type).Info("IngressRoute event detected")
-				config, err := fetchHomerConfig(clientset, crdClient, traefikClient)
-				if err != nil {
-					log.WithError(err).Error("Error fetching Homer config")
-					continue
-				}
-				if err := writeToFile(config); err != nil {
-					log.WithError(err).Error("Error writing to file")
-				}
-			} else {
-				log.WithField("eventType", event.Type).Warn("Unhandled event type")
-			}
+		if err := writeToFile(config); err != nil {
+			log.WithError(err).Error("Error writing config file")
 		}
 	}
+
+	runWatcherLoop(
+		"Ingress",
+		func() (watch.Interface, error) {
+			return clientset.NetworkingV1().Ingresses("").Watch(context.TODO(), metav1.ListOptions{})
+		},
+		eventHandler,
+		stopCh,
+	)
+
+	runWatcherLoop(
+		"IngressRoute",
+		func() (watch.Interface, error) {
+			crdExists, err := checkCRDExists(crdClient, "ingressroutes.traefik.io")
+			if err != nil {
+				return nil, fmt.Errorf("error checking IngressRoute CRD existence: %w", err)
+			}
+			if !crdExists {
+				return nil, nil
+			}
+
+			return traefikClient.TraefikV1alpha1().IngressRoutes("").Watch(context.TODO(), metav1.ListOptions{})
+		},
+		eventHandler,
+		stopCh,
+	)
 }
 
 func main() {
@@ -467,7 +494,7 @@ func main() {
 		}
 	}, 10*time.Minute, stopStructCh)
 
-	go watchIngresses(clientset, crdClient, traefikClient)
+	go watchIngresses(clientset, crdClient, traefikClient, stopStructCh)
 
 	<-stopStructCh
 }
