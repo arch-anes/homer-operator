@@ -7,7 +7,7 @@ toolchain go1.24.5
 require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.10.0
-	github.com/traefik/traefik/v3 v3.4.1
+	github.com/traefik/traefik/v3 v3.4.5
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.33.2
 	k8s.io/apiextensions-apiserver v0.33.2
