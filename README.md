@@ -22,6 +22,16 @@ The **Homer Operator** automatically generates and manages Homer configurations.
 
 The operator automatically detects **Ingresses** and adds them to Homer. Customize its behavior by adding annotations to your Kubernetes `Ingress` or Traefik `IngressRoute`.
 
+### Watching specific namespaces
+
+#### Helm values
+
+One can set a list of namespaces to watch via the `watchedNamespaces` field in the Helm values.
+
+#### Environment variables
+
+Alternatively, one can specify a comma-separated list of namespaces to watch in `WATCHED_NAMESPACES` environment variable.
+
 ### Customizing Categories
 
 | **Annotation**               | **Description**                                                                      |
