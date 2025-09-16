@@ -50,6 +50,8 @@ const (
 
 var log = logrus.New()
 
+var watchedNamespaces = parseWatchedNamespaces()
+
 type HomerItem struct {
 	Name     string `yaml:"name"`
 	Logo     string `yaml:"logo"`
@@ -73,6 +75,29 @@ type HomerConfig struct {
 func init() {
 	log.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
 	log.SetLevel(logrus.InfoLevel)
+}
+
+func parseWatchedNamespaces() []string {
+	v := os.Getenv("WATCHED_NAMESPACES")
+	if v == "" {
+		return []string{""}
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	for _, ns := range strings.Split(v, ",") {
+		ns = strings.TrimSpace(ns)
+		if ns == "" {
+			continue
+		}
+		if _, ok := seen[ns]; ok {
+			continue
+		}
+		seen[ns] = struct{}{}
+		out = append(out, ns)
+	}
+	sort.Strings(out)
+	log.WithField("namespaces", out).Info("Namespace watchlist active")
+	return out
 }
 
 func ignoreError[T any](val T, _ error) T {
@@ -172,20 +197,22 @@ func (hs HomerService) GetName() string { return hs.Name }
 
 func fetchAllIngresses(clientset kubernetes.Interface) ([]networkingv1.Ingress, error) {
 	var allIngresses []networkingv1.Ingress
-	continueToken := ""
 
-	for {
-		options := metav1.ListOptions{Continue: continueToken}
-		ingressList, err := clientset.NetworkingV1().Ingresses("").List(context.TODO(), options)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list ingresses: %w", err)
-		}
+	for _, ns := range watchedNamespaces {
+		continueToken := ""
+		for {
+			options := metav1.ListOptions{Continue: continueToken}
+			ingressList, err := clientset.NetworkingV1().Ingresses(ns).List(context.TODO(), options)
+			if err != nil {
+				return nil, fmt.Errorf("failed to list ingresses in %q: %w", ns, err)
+			}
 
-		allIngresses = append(allIngresses, ingressList.Items...)
-		if ingressList.Continue == "" {
-			break
+			allIngresses = append(allIngresses, ingressList.Items...)
+			if ingressList.Continue == "" {
+				break
+			}
+			continueToken = ingressList.Continue
 		}
-		continueToken = ingressList.Continue
 	}
 
 	log.Infof("Total ingresses fetched: %d", len(allIngresses))
@@ -194,20 +221,23 @@ func fetchAllIngresses(clientset kubernetes.Interface) ([]networkingv1.Ingress, 
 
 func fetchAllIngressRoutes(traefikClient traefikclientset.Interface) ([]traefikv1alpha1.IngressRoute, error) {
 	var allIngressRoutes []traefikv1alpha1.IngressRoute
-	continueToken := ""
 
-	for {
-		options := metav1.ListOptions{Continue: continueToken}
-		ingressRouteList, err := traefikClient.TraefikV1alpha1().IngressRoutes("").List(context.TODO(), options)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list ingress routes: %w", err)
-		}
+	for _, ns := range watchedNamespaces {
+		continueToken := ""
 
-		allIngressRoutes = append(allIngressRoutes, ingressRouteList.Items...)
-		if ingressRouteList.Continue == "" {
-			break
+		for {
+			options := metav1.ListOptions{Continue: continueToken}
+			ingressRouteList, err := traefikClient.TraefikV1alpha1().IngressRoutes(ns).List(context.TODO(), options)
+			if err != nil {
+				return nil, fmt.Errorf("failed to list ingress routes in %q: %w", ns, err)
+			}
+
+			allIngressRoutes = append(allIngressRoutes, ingressRouteList.Items...)
+			if ingressRouteList.Continue == "" {
+				break
+			}
+			continueToken = ingressRouteList.Continue
 		}
-		continueToken = ingressRouteList.Continue
 	}
 
 	log.Infof("Total ingress routes fetched: %d", len(allIngressRoutes))
@@ -421,31 +451,33 @@ func watchIngresses(
 		}
 	}
 
-	runWatcherLoop(
-		"Ingress",
-		func() (watch.Interface, error) {
-			return clientset.NetworkingV1().Ingresses("").Watch(context.TODO(), metav1.ListOptions{})
-		},
-		eventHandler,
-		stopCh,
-	)
+	for _, ns := range watchedNamespaces {
+		ns := ns
+		runWatcherLoop(
+			"Ingress("+ns+")",
+			func() (watch.Interface, error) {
+				return clientset.NetworkingV1().Ingresses(ns).Watch(context.TODO(), metav1.ListOptions{})
+			},
+			eventHandler,
+			stopCh,
+		)
+	}
 
-	runWatcherLoop(
-		"IngressRoute",
-		func() (watch.Interface, error) {
-			crdExists, err := checkCRDExists(crdClient, "ingressroutes.traefik.io")
-			if err != nil {
-				return nil, fmt.Errorf("error checking IngressRoute CRD existence: %w", err)
-			}
-			if !crdExists {
-				return nil, nil
-			}
-
-			return traefikClient.TraefikV1alpha1().IngressRoutes("").Watch(context.TODO(), metav1.ListOptions{})
-		},
-		eventHandler,
-		stopCh,
-	)
+	for _, ns := range watchedNamespaces {
+		ns := ns
+		runWatcherLoop(
+			"IngressRoute("+ns+")",
+			func() (watch.Interface, error) {
+				crdExists, err := checkCRDExists(crdClient, "ingressroutes.traefik.io")
+				if err != nil || !crdExists {
+					return nil, err
+				}
+				return traefikClient.TraefikV1alpha1().IngressRoutes(ns).Watch(context.TODO(), metav1.ListOptions{})
+			},
+			eventHandler,
+			stopCh,
+		)
+	}
 }
 
 func main() {

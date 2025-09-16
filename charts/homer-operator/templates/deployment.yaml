@@ -34,6 +34,9 @@ spec:
           imagePullPolicy: {{ .Values.operatorImage.pullPolicy }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: WATCHED_NAMESPACES
+              value: {{ join "," (.Values.watchedNamespaces | default (list)) | quote }}
           volumeMounts:
             - name: shared
               mountPath: /www/assets/
