@@ -13,15 +13,16 @@ import (
 
 	"github.com/iancoleman/strcase"
 	"github.com/sirupsen/logrus"
-	traefikclientset "github.com/traefik/traefik/v3/pkg/provider/kubernetes/crd/generated/clientset/versioned"
-	traefikv1alpha1 "github.com/traefik/traefik/v3/pkg/provider/kubernetes/crd/traefikio/v1alpha1"
 	"gopkg.in/yaml.v3"
 	networkingv1 "k8s.io/api/networking/v1"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -51,6 +52,26 @@ const (
 var log = logrus.New()
 
 var watchedNamespaces = parseWatchedNamespaces()
+
+var ingressRouteGVR = schema.GroupVersionResource{
+	Group:    "traefik.io",
+	Version:  "v1alpha1",
+	Resource: "ingressroutes",
+}
+
+type IngressRoute struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              IngressRouteSpec `json:"spec"`
+}
+
+type IngressRouteSpec struct {
+	Routes []IngressRouteRoute `json:"routes"`
+}
+
+type IngressRouteRoute struct {
+	Match string `json:"match"`
+}
 
 type HomerItem struct {
 	Name     string `yaml:"name"`
@@ -118,7 +139,7 @@ func deduceURL(ingress networkingv1.Ingress) string {
 	return ""
 }
 
-func deduceURLFromIngressRoute(ingressRoute traefikv1alpha1.IngressRoute) string {
+func deduceURLFromIngressRoute(ingressRoute IngressRoute) string {
 	if len(ingressRoute.Spec.Routes) > 0 && len(ingressRoute.Spec.Routes[0].Match) > 0 {
 		match := ingressRoute.Spec.Routes[0].Match
 		if strings.HasPrefix(match, "Host(`") && strings.HasSuffix(match, "`)") {
@@ -163,7 +184,7 @@ func extractHomerAnnotations(ingress networkingv1.Ingress) *HomerItem {
 	)
 }
 
-func extractHomerAnnotationsFromIngressRoute(ingressRoute traefikv1alpha1.IngressRoute) *HomerItem {
+func extractHomerAnnotationsFromIngressRoute(ingressRoute IngressRoute) *HomerItem {
 	return extractHomerItemFromAnnotations(
 		ingressRoute.Annotations,
 		ingressRoute.Name,
@@ -219,24 +240,30 @@ func fetchAllIngresses(clientset kubernetes.Interface) ([]networkingv1.Ingress, 
 	return allIngresses, nil
 }
 
-func fetchAllIngressRoutes(traefikClient traefikclientset.Interface) ([]traefikv1alpha1.IngressRoute, error) {
-	var allIngressRoutes []traefikv1alpha1.IngressRoute
+func fetchAllIngressRoutes(dynamicClient dynamic.Interface) ([]IngressRoute, error) {
+	var allIngressRoutes []IngressRoute
 
 	for _, ns := range watchedNamespaces {
 		continueToken := ""
 
 		for {
 			options := metav1.ListOptions{Continue: continueToken}
-			ingressRouteList, err := traefikClient.TraefikV1alpha1().IngressRoutes(ns).List(context.TODO(), options)
+			ingressRouteList, err := dynamicClient.Resource(ingressRouteGVR).Namespace(ns).List(context.TODO(), options)
 			if err != nil {
 				return nil, fmt.Errorf("failed to list ingress routes in %q: %w", ns, err)
 			}
 
-			allIngressRoutes = append(allIngressRoutes, ingressRouteList.Items...)
-			if ingressRouteList.Continue == "" {
+			for _, item := range ingressRouteList.Items {
+				var ir IngressRoute
+				if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.Object, &ir); err == nil {
+					allIngressRoutes = append(allIngressRoutes, ir)
+				}
+			}
+
+			if ingressRouteList.GetContinue() == "" {
 				break
 			}
-			continueToken = ingressRouteList.Continue
+			continueToken = ingressRouteList.GetContinue()
 		}
 	}
 
@@ -255,13 +282,13 @@ func checkCRDExists(clientset apiextensionsclientset.Interface, crdName string) 
 	return true, nil
 }
 
-func fetchHomerConfig(clientset kubernetes.Interface, crdClient apiextensionsclientset.Interface, traefikClient traefikclientset.Interface) (HomerConfig, error) {
+func fetchHomerConfig(clientset kubernetes.Interface, crdClient apiextensionsclientset.Interface, dynamicClient dynamic.Interface) (HomerConfig, error) {
 	ingresses, err := fetchAllIngresses(clientset)
 	if err != nil {
 		return HomerConfig{}, fmt.Errorf("failed to fetch ingresses: %w", err)
 	}
 
-	ingressRoutes, err := fetchIngressRoutesIfCRDExists(crdClient, traefikClient)
+	ingressRoutes, err := fetchIngressRoutesIfCRDExists(crdClient, dynamicClient)
 	if err != nil {
 		return HomerConfig{}, fmt.Errorf("failed to fetch ingress routes: %w", err)
 	}
@@ -272,7 +299,7 @@ func fetchHomerConfig(clientset kubernetes.Interface, crdClient apiextensionscli
 	return HomerConfig{Services: services}, nil
 }
 
-func fetchIngressRoutesIfCRDExists(crdClient apiextensionsclientset.Interface, traefikClient traefikclientset.Interface) ([]traefikv1alpha1.IngressRoute, error) {
+func fetchIngressRoutesIfCRDExists(crdClient apiextensionsclientset.Interface, dynamicClient dynamic.Interface) ([]IngressRoute, error) {
 	crdExists, err := checkCRDExists(crdClient, "ingressroutes.traefik.io")
 	if err != nil {
 		return nil, fmt.Errorf("error checking CRD existence: %w", err)
@@ -282,7 +309,7 @@ func fetchIngressRoutesIfCRDExists(crdClient apiextensionsclientset.Interface, t
 		return nil, nil
 	}
 
-	ingressRoutes, err := fetchAllIngressRoutes(traefikClient)
+	ingressRoutes, err := fetchAllIngressRoutes(dynamicClient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch ingress routes: %w", err)
 	}
@@ -290,7 +317,7 @@ func fetchIngressRoutesIfCRDExists(crdClient apiextensionsclientset.Interface, t
 	return ingressRoutes, nil
 }
 
-func processResourcesToServiceMap(ingresses []networkingv1.Ingress, ingressRoutes []traefikv1alpha1.IngressRoute) map[string]*HomerService {
+func processResourcesToServiceMap(ingresses []networkingv1.Ingress, ingressRoutes []IngressRoute) map[string]*HomerService {
 	serviceMap := make(map[string]*HomerService)
 
 	for _, ingress := range ingresses {
@@ -329,7 +356,7 @@ func processIngress(ingress networkingv1.Ingress, serviceMap map[string]*HomerSe
 	processResource(ingress.Annotations, item, serviceMap)
 }
 
-func processIngressRoute(ingressRoute traefikv1alpha1.IngressRoute, serviceMap map[string]*HomerService) {
+func processIngressRoute(ingressRoute IngressRoute, serviceMap map[string]*HomerService) {
 	log.WithField("ingressRoute", ingressRoute.Name).Debug("Processing ingress route")
 	item := extractHomerAnnotationsFromIngressRoute(ingressRoute)
 	processResource(ingressRoute.Annotations, item, serviceMap)
@@ -436,12 +463,12 @@ func runWatcherLoop(
 func watchIngresses(
 	clientset kubernetes.Interface,
 	crdClient apiextensionsclientset.Interface,
-	traefikClient traefikclientset.Interface,
+	dynamicClient dynamic.Interface,
 	stopCh <-chan struct{},
 ) {
 	eventHandler := func(resourceName string, event watch.Event) {
 		log.WithField("eventType", event.Type).Infof("%s event detected", resourceName)
-		config, err := fetchHomerConfig(clientset, crdClient, traefikClient)
+		config, err := fetchHomerConfig(clientset, crdClient, dynamicClient)
 		if err != nil {
 			log.WithError(err).Error("Error fetching Homer config")
 			return
@@ -472,7 +499,7 @@ func watchIngresses(
 				if err != nil || !crdExists {
 					return nil, err
 				}
-				return traefikClient.TraefikV1alpha1().IngressRoutes(ns).Watch(context.TODO(), metav1.ListOptions{})
+				return dynamicClient.Resource(ingressRouteGVR).Namespace(ns).Watch(context.TODO(), metav1.ListOptions{})
 			},
 			eventHandler,
 			stopCh,
@@ -509,14 +536,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	traefikClient, err := traefikclientset.NewForConfig(config)
+	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
-		log.WithError(err).Error("Error creating Traefik client")
+		log.WithError(err).Error("Error creating Dynamic client")
 		os.Exit(1)
 	}
 
 	go wait.Until(func() {
-		config, err := fetchHomerConfig(clientset, crdClient, traefikClient)
+		config, err := fetchHomerConfig(clientset, crdClient, dynamicClient)
 		if err != nil {
 			log.WithError(err).Error("Error during periodic refresh")
 			return
@@ -526,7 +553,7 @@ func main() {
 		}
 	}, 10*time.Minute, stopStructCh)
 
-	go watchIngresses(clientset, crdClient, traefikClient, stopStructCh)
+	go watchIngresses(clientset, crdClient, dynamicClient, stopStructCh)
 
 	<-stopStructCh
 }

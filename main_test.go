@@ -5,11 +5,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	traefikfake "github.com/traefik/traefik/v3/pkg/provider/kubernetes/crd/generated/clientset/versioned/fake"
-	traefikv1alpha1 "github.com/traefik/traefik/v3/pkg/provider/kubernetes/crd/traefikio/v1alpha1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -41,9 +41,9 @@ func TestDeduceURL(t *testing.T) {
 }
 
 func TestDeduceURLFromIngressRoute(t *testing.T) {
-	ingressRoute := traefikv1alpha1.IngressRoute{
-		Spec: traefikv1alpha1.IngressRouteSpec{
-			Routes: []traefikv1alpha1.Route{
+	ingressRoute := IngressRoute{
+		Spec: IngressRouteSpec{
+			Routes: []IngressRouteRoute{
 				{
 					Match: "Host(`example.com`)",
 				},
@@ -53,7 +53,7 @@ func TestDeduceURLFromIngressRoute(t *testing.T) {
 
 	assert.Equal(t, "https://example.com", deduceURLFromIngressRoute(ingressRoute))
 
-	ingressRoute.Spec.Routes = []traefikv1alpha1.Route{}
+	ingressRoute.Spec.Routes = []IngressRouteRoute{}
 	assert.Equal(t, "", deduceURLFromIngressRoute(ingressRoute))
 }
 
@@ -212,9 +212,9 @@ func TestFetchHomerConfig(t *testing.T) {
 	})
 
 	crdClient := apiextensionsfake.NewSimpleClientset()
-	traefikClient := traefikfake.NewSimpleClientset()
+	dynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
 
-	config, err := fetchHomerConfig(mockClient, crdClient, traefikClient)
+	config, err := fetchHomerConfig(mockClient, crdClient, dynamicClient)
 	assert.NoError(t, err)
 	assert.Len(t, config.Services, 1)
 	assert.Equal(t, "default", config.Services[0].Name)
