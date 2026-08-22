@@ -1,10 +1,13 @@
-FROM golang:1-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
-COPY main.go go.mod go.sum ./
-RUN go mod tidy && go build && go test -v
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY *.go ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/homer-operator .
 
 FROM alpine:3
 
-COPY --from=builder /app/homer-operator /usr/bin/homer-operator
-ENTRYPOINT ["homer-operator"]
+COPY --from=builder /out/homer-operator /usr/local/bin/homer-operator
+ENTRYPOINT ["/usr/local/bin/homer-operator"]

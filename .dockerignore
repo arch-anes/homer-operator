@@ -1,0 +1,6 @@
+.git
+.github
+.worktrees
+charts
+*.md
+*.out

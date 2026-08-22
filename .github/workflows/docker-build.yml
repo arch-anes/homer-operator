@@ -9,6 +9,8 @@ jobs:
   build-and-push:
     name: Build Docker image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -18,5 +20,4 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build Docker image
-        run: |
-          docker build .
+        run: docker build .

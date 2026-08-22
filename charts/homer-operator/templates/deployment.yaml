@@ -80,7 +80,6 @@ spec:
         - name: config
           configMap:
             name: {{ include "homer-operator.fullname" . }}
-      
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

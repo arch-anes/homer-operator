@@ -9,6 +9,8 @@ jobs:
   build-and-release:
     name: Build Helm Chart
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -18,5 +20,7 @@ jobs:
         uses: azure/setup-helm@v5.0.1
 
       - name: Package Helm chart
-        run: |
-          helm template ./charts/homer-operator
+        run: helm lint ./charts/homer-operator
+
+      - name: Render Helm chart
+        run: helm template homer-operator ./charts/homer-operator

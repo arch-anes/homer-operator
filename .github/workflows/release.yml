@@ -29,8 +29,9 @@ jobs:
       - name: Calculate next version
         id: version
         run: |
+          set -euo pipefail
           # Get the latest tag
-          latest_tag=$(git describe --tags `git rev-list --tags --max-count=1`)
+          latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)")
           echo "Latest tag: $latest_tag"
 
           # Extract current version
@@ -39,10 +40,10 @@ jobs:
 
           # Default to patch bump unless the commit message specifies "feat" or "BREAKING CHANGE"
           bump="patch"
-          if git log -1 --pretty=%B | grep -iq "feat"; then
-            bump="minor"
-          elif git log -1 --pretty=%B | grep -iq "BREAKING CHANGE"; then
+          if git log -1 --pretty=%B | grep -iq "BREAKING CHANGE"; then
             bump="major"
+          elif git log -1 --pretty=%B | grep -iq "feat"; then
+            bump="minor"
           fi
 
           # Calculate the new version
@@ -54,7 +55,7 @@ jobs:
           esac
           new_version="$major.$minor.$patch"
           echo "New version: $new_version"
-          echo "new_version=$new_version" >> $GITHUB_ENV
+          echo "new_version=$new_version" >> "$GITHUB_ENV"
 
       - name: Configure git
         run: |
