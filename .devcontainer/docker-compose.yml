@@ -14,7 +14,7 @@ services:
       - devcontainer-network
 
   devcontainer:
-    image: ghcr.io/arch-anes/dev-container-kubernetes-go:latest
+    image: ghcr.io/arch-anes/dev-container-kubernetes:latest
     container_name: homer-operator-devcontainer
     restart: unless-stopped
     volumes:
